@@ -17,8 +17,8 @@
       </el-icon>
       <el-dropdown>
         <span class="el-dropdown-link">
-          <el-avatar :size="30" :src="userStore.state.avatar" />
-          {{ userStore.state.username }}
+          <el-avatar :size="30" :src="userAvatar" />
+          {{ username }}
         </span>
         <template #dropdown>
           <el-dropdown-menu>
@@ -32,17 +32,78 @@
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElAvatar } from 'element-plus';
 import userStore from '@/store/user';
 import messageStore from '@/store/message';
 import { HomeFilled, FullScreen, Bell } from '@element-plus/icons-vue';
+import { getUserInfo } from '@/api/user';
 
 const router = useRouter();
 
 // 获取未读消息数量
 const unreadCount = computed(() => messageStore.unreadCount.value);
+
+// 使用ref代替计算属性来存储用户头像和用户名，以便手动更新
+const avatarSrc = ref(userStore.state.avatar);
+const usernameRef = ref(userStore.state.username);
+
+// 计算属性提供给模板
+const userAvatar = computed(() => avatarSrc.value);
+const username = computed(() => usernameRef.value);
+
+// 监听头像更新事件
+const handleAvatarUpdated = (event) => {
+  console.log('接收到头像更新事件:', event.detail);
+  avatarSrc.value = event.detail.avatar;
+};
+
+// 获取最新的用户信息
+const fetchUserInfo = async () => {
+  try {
+    const response = await getUserInfo();
+    if (response.data && response.data.code === 200) {
+      const userData = response.data.data;
+      console.log('Navbar组件获取到的用户信息:', userData);
+      
+      // 更新头像
+      if (userData.avatar) {
+        avatarSrc.value = userData.avatar;
+        userStore.updateAvatar(userData.avatar);
+        localStorage.setItem('avatar', userData.avatar);
+      }
+      
+      // 更新用户名
+      if (userData.username) {
+        usernameRef.value = userData.username;
+        userStore.updateUserInfo({ username: userData.username });
+        localStorage.setItem('name', userData.username);
+      }
+    }
+  } catch (error) {
+    console.error('获取用户信息失败:', error);
+  }
+};
+
+// 监听路由变化，当用户登录或返回主页时，重新获取用户信息
+watch(() => router.currentRoute.value.path, (newPath) => {
+  if (newPath === '/layout' || newPath === '/') {
+    fetchUserInfo();
+  }
+}, { immediate: true });
+
+// 组件挂载时添加事件监听并获取用户信息
+onMounted(() => {
+  window.addEventListener('avatar-updated', handleAvatarUpdated);
+  // 初始加载时获取一次用户信息
+  fetchUserInfo();
+});
+
+// 组件卸载时移除事件监听
+onUnmounted(() => {
+  window.removeEventListener('avatar-updated', handleAvatarUpdated);
+});
 
 const goToProfile = () => {
   router.push('/profile'); // 修改跳转路径为个人中心页面
@@ -66,7 +127,7 @@ const toggleFullscreen = () => {
 };
 
 const goToHome = () => {
-  router.push('/home');
+  router.push('/layout');
 };
 
 // 前往消息页面

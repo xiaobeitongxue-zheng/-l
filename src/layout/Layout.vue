@@ -26,26 +26,21 @@
           </el-menu-item>
           
           <!-- 个人知识库管理 -->
-          <el-menu-item index="/personal">
+          <el-menu-item index="/knowledge">
             <el-icon><UserFilled /></el-icon>
-            <span>个人知识库</span>
+            <span>个人空间</span>
           </el-menu-item>
           
           <!-- 团队协作 -->
-          <el-sub-menu index="/team">
-            <template #title>
-              <el-icon><Service /></el-icon>
-              <span>团队协作</span>
-            </template>
-            <el-menu-item index="/team/knowledge">团队知识库</el-menu-item>
-            <el-menu-item index="/team/management">团队管理</el-menu-item>
-            <el-menu-item index="/team/statistics">团队统计</el-menu-item>
-          </el-sub-menu>
+          <el-menu-item index="/team">
+            <el-icon><Service /></el-icon>
+            <span>团队空间</span>
+          </el-menu-item>
 
            <!-- 社区交流 -->
            <el-menu-item index="/community">
             <el-icon><Promotion /></el-icon>
-            <span>社区交流</span>
+            <span>社区空间</span>
           </el-menu-item>
 
           <!-- 用户中心 -->

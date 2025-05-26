@@ -1,122 +1,139 @@
 import { ref, computed } from 'vue'
+import { getNotificationList, readNotification, deleteNotification } from '@/api/message'
 
-// 定义消息接口
+// 定义消息接口，与数据库结构对应
 export interface Message {
-  id: number
-  title: string
-  content: string
-  sender: string
-  sendTime: string
-  isRead: boolean
-  type: 'system' | 'user' | 'team' // 消息类型：系统消息、用户消息、团队消息
+  id: number;
+  receiver_id: number;
+  message_content: string;
+  message_type: number; // 1-点赞 2-评论 3-收藏
+  is_read: boolean;
+  create_time: string;
+  read_time?: string;
 }
 
 // 创建消息状态和方法
-const messages = ref<Message[]>([
-  {
-    id: 1,
-    title: '系统通知',
-    content: '您有新的知识文档需要审核',
-    sender: '系统',
-    sendTime: '2025-04-14 10:30',
-    isRead: false,
-    type: 'system'
-  },
-  {
-    id: 2,
-    title: '团队消息',
-    content: '研发团队有一个新的文档分享给您',
-    sender: '研发团队',
-    sendTime: '2025-04-13 16:45',
-    isRead: false,
-    type: 'team'
-  },
-  {
-    id: 3,
-    title: '用户消息',
-    content: '张三在您的文档中添加了评论',
-    sender: '张三',
-    sendTime: '2025-04-12 09:15',
-    isRead: false,
-    type: 'user'
-  },
-  {
-    id: 4,
-    title: '系统通知',
-    content: '您的账户权限已更新',
-    sender: '系统',
-    sendTime: '2025-04-10 14:20',
-    isRead: true,
-    type: 'system'
-  },
-  {
-    id: 5,
-    title: '用户消息',
-    content: '李四向您发送了一条私信',
-    sender: '李四',
-    sendTime: '2025-04-09 11:30',
-    isRead: true,
-    type: 'user'
-  }
-])
+const messages = ref<Message[]>([])
+const isLoading = ref(false)
+const currentPage = ref(0)
+const pageSize = ref(10)
 
 // 计算未读消息数量
 const unreadCount = computed(() => {
-  return messages.value.filter(msg => !msg.isRead).length
+  return messages.value.filter(msg => !msg.is_read).length
 })
 
-// 获取所有消息
-const getAllMessages = computed(() => {
-  return messages.value
-})
+// 加载消息列表
+const loadMessages = async (refresh = false) => {
+  if (isLoading.value) return
 
-// 获取未读消息
-const getUnreadMessages = computed(() => {
-  return messages.value.filter(msg => !msg.isRead)
-})
-
-// 标记消息为已读
-const markAsRead = (id: number) => {
-  const message = messages.value.find(msg => msg.id === id)
-  if (message) {
-    message.isRead = true
+  isLoading.value = true
+  try {
+    if (refresh) {
+      currentPage.value = 0
+    }
+    
+    const res = await getNotificationList(currentPage.value, pageSize.value)
+    if (res.data && res.data.code === 200) {
+      if (refresh) {
+        messages.value = res.data.data || []
+      } else {
+        messages.value = [...messages.value, ...(res.data.data || [])]
+      }
+      
+      // 如果返回的数据少于请求的数量，说明已经加载完所有数据
+      if ((res.data.data || []).length < pageSize.value) {
+        // 没有更多数据了
+      } else {
+        currentPage.value += pageSize.value
+      }
+    }
+  } catch (error) {
+    console.error('加载消息失败:', error)
+  } finally {
+    isLoading.value = false
   }
 }
 
-// 标记所有消息为已读
-const markAllAsRead = () => {
-  messages.value.forEach(msg => {
-    msg.isRead = true
-  })
+// 获取消息类型的用户友好名称
+const getMessageTypeName = (type: number) => {
+  switch (type) {
+    case 1: return '点赞'
+    case 2: return '评论'
+    case 3: return '收藏'
+    default: return '通知'
+  }
 }
 
-// 添加新消息
-const addMessage = (message: Omit<Message, 'id'>) => {
-  const newId = messages.value.length > 0 
-    ? Math.max(...messages.value.map(msg => msg.id)) + 1 
-    : 1
-  
-  messages.value.push({
-    ...message,
-    id: newId
-  })
+// 获取消息图标类型
+const getMessageIconType = (type: number) => {
+  switch (type) {
+    case 1: return 'user' // 点赞
+    case 2: return 'user' // 评论
+    case 3: return 'user' // 收藏
+    default: return 'system'
+  }
+}
+
+// 标记消息为已读
+const markAsRead = async (id: number) => {
+  try {
+    const res = await readNotification(id)
+    if (res.data && res.data.code === 200) {
+      const message = messages.value.find(msg => msg.id === id)
+      if (message) {
+        message.is_read = true
+        message.read_time = new Date().toISOString()
+      }
+      return true
+    }
+    return false
+  } catch (error) {
+    console.error('标记消息已读失败:', error)
+    return false
+  }
 }
 
 // 删除消息
-const deleteMessage = (id: number) => {
-  const index = messages.value.findIndex(msg => msg.id === id)
-  if (index !== -1) {
-    messages.value.splice(index, 1)
+const deleteMessage = async (id: number) => {
+  try {
+    const res = await deleteNotification(id)
+    if (res.data && res.data.code === 200) {
+      messages.value = messages.value.filter(msg => msg.id !== id)
+      return true
+    }
+    return false
+  } catch (error) {
+    console.error('删除消息失败:', error)
+    return false
   }
 }
+
+// 标记所有为已读
+const markAllAsRead = async () => {
+  const unreadMessages = messages.value.filter(msg => !msg.is_read)
+  const promises = unreadMessages.map(msg => markAsRead(msg.id))
+  
+  try {
+    await Promise.all(promises)
+    return true
+  } catch (error) {
+    console.error('标记所有消息已读失败:', error)
+    return false
+  }
+}
+
+// 初始加载
+loadMessages(true)
 
 export default {
   messages,
   unreadCount,
-  getAllMessages,
-  getUnreadMessages,
+  isLoading,
+  loadMessages,
   markAsRead,
+  deleteMessage,
   markAllAsRead,
-  addMessage,
-  deleteMessage
+  getMessageTypeName,
+  getMessageIconType
 }

@@ -11,9 +11,66 @@
           <el-menu-item index="documents">文档管理</el-menu-item>
           <el-menu-item index="sharing">分享</el-menu-item>
         </el-menu>
-        </div>
       </div>
+      <!-- 全局搜索框 -->
+      <div class="global-search">
+        <el-input
+          v-model="globalSearchKeyword"
+          placeholder="搜索个人知识库..."
+          :prefix-icon="Search"
+          clearable
+          @keyup.enter="handleGlobalSearch"
+        >
+          <template #append>
+            <el-button :icon="Search" @click="handleGlobalSearch"></el-button>
+          </template>
+        </el-input>
+      </div>
+    </div>
   
+    <!-- 搜索结果抽屉 -->
+    <el-drawer
+      v-model="searchResultsVisible"
+      title="搜索结果"
+      size="50%"
+      direction="rtl"
+    >
+      <div class="search-results-content" v-loading="searchLoading">
+        <div class="search-info">
+          <span>关键词: <strong>{{ globalSearchKeyword }}</strong></span>
+          <span>共找到 <strong>{{ searchResults.length }}</strong> 条结果</span>
+        </div>
+        
+        <el-empty v-if="!searchLoading && searchResults.length === 0" description="未找到相关结果" />
+        
+        <el-scrollbar height="calc(100vh - 220px)">
+          <div class="search-result-list">
+            <el-card 
+              v-for="result in searchResults" 
+              :key="result.id" 
+              class="search-result-item" 
+              shadow="hover"
+              @click="viewSearchResult(result)"
+            >
+              <div class="result-header">
+                <h4>{{ result.title || result.name }}</h4>
+                <el-tag size="small" :type="getResultTypeTag(result.type)">
+                  {{ getDocumentTypeName(result.type) }}
+                </el-tag>
+              </div>
+              <div class="result-content" v-if="result.content">
+                <p>{{ result.content }}</p>
+              </div>
+              <div class="result-meta">
+                <span>创建时间: {{ formatDate(new Date(result.createTime)) }}</span>
+                <span v-if="result.updateTime">最后更新: {{ formatDate(new Date(result.updateTime)) }}</span>
+              </div>
+            </el-card>
+          </div>
+        </el-scrollbar>
+      </div>
+    </el-drawer>
+
     <!-- 主要内容区域 -->
     <div class="main-content">
       <!-- 工作台页面 -->
@@ -157,208 +214,353 @@
             <el-button @click="createNewFolder">
               <el-icon><FolderAdd /></el-icon> 新建文件夹
             </el-button>
+            <el-button @click="createNewKnowledgeBase">
+              <el-icon><Collection /></el-icon> 新建知识库
+            </el-button>
           </div>
         </div>
         
-        <!-- 文档筛选区域 -->
-        <div class="filter-section">
-          <el-row :gutter="20">
-            <el-col :span="8">
-              <el-input
-                v-model="searchKeyword"
-                placeholder="搜索文档..."
-                :prefix-icon="Search"
-                clearable
-                @input="searchDocuments"
+        <!-- 文档标签页 -->
+        <el-tabs v-model="documentActiveTab" class="document-tabs" @tab-change="handleDocumentTabChange">
+          <el-tab-pane label="文件" name="files">
+            <!-- 文档筛选区域 -->
+            <div class="filter-section">
+              <el-row :gutter="20">
+                <el-col :span="8">
+                  <el-input
+                    v-model="searchKeyword"
+                    placeholder="搜索文档..."
+                    :prefix-icon="Search"
+                    clearable
+                    @input="searchDocuments"
+                  />
+                </el-col>
+                <el-col :span="4">
+                  <el-select v-model="fileTypeFilter" placeholder="文件类型" clearable @change="filterDocuments">
+                    <el-option label="所有类型" value="" />
+                    <el-option label="文档 (Word/PDF)" value="document" />
+                    <el-option label="表格 (Excel)" value="spreadsheet" />
+                    <el-option label="演示文稿 (PPT)" value="presentation" />
+                    <el-option label="图片" value="image" />
+                    <el-option label="其他" value="other" />
+                  </el-select>
+                </el-col>
+                <el-col :span="4">
+                  <el-select v-model="categoryFilter" placeholder="文档分类" clearable @change="filterDocuments">
+                    <el-option label="所有分类" value="" />
+                    <el-option 
+                      v-for="category in categories" 
+                      :key="category.id" 
+                      :label="category.name" 
+                      :value="category.id" 
+                    />
+                  </el-select>
+                </el-col>
+                <el-col :span="4">
+                  <el-select v-model="sortOption" placeholder="排序方式" @change="sortDocuments">
+                    <el-option label="最近修改" value="lastModified" />
+                    <el-option label="名称" value="name" />
+                    <el-option label="大小" value="size" />
+                    <el-option label="创建时间" value="createdAt" />
+                  </el-select>
+                </el-col>
+                <el-col :span="4" style="text-align: right;">
+                  <el-radio-group v-model="viewMode" size="small">
+                    <el-radio-button label="table">
+                      <el-icon><List /></el-icon>
+                    </el-radio-button>
+                    <el-radio-button label="grid">
+                      <el-icon><Grid /></el-icon>
+                    </el-radio-button>
+                  </el-radio-group>
+                </el-col>
+              </el-row>
+              
+              <!-- 标签筛选区域 -->
+              <div class="tag-filter-section">
+                <el-scrollbar height="56px">
+                  <div class="tag-list">
+                    <el-tag
+                      v-for="tag in tags"
+                      :key="tag.id"
+                      :type="selectedTags.includes(tag.id) ? '' : 'info'"
+                      :effect="selectedTags.includes(tag.id) ? 'dark' : 'plain'"
+                      class="tag-item"
+                      @click="toggleTagFilter(tag.id)"
+                    >
+                      {{ tag.name }}
+                    </el-tag>
+                    <el-button size="small" type="text" @click="showAllTags">
+                      <el-icon><Plus /></el-icon> 管理标签
+                    </el-button>
+                  </div>
+                </el-scrollbar>
+              </div>
+              
+              <!-- 导航路径 -->
+              <div class="navigation-path">
+                <el-breadcrumb separator="/">
+                  <el-breadcrumb-item @click="navigateToRoot" class="clickable">
+                    <el-icon><FolderOpened /></el-icon> 全部文件
+                  </el-breadcrumb-item>
+                  <el-breadcrumb-item 
+                    v-for="(folder, index) in currentPath" 
+                    :key="folder.id"
+                    @click="navigateToPath(index)"
+                    class="clickable"
+                  >
+                    {{ folder.name }}
+                  </el-breadcrumb-item>
+                </el-breadcrumb>
+              </div>
+            </div>
+            
+            <!-- 文档列表（表格视图） -->
+            <el-table
+              v-if="viewMode === 'table'"
+              :data="currentLocationDocuments"
+              style="width: 100%"
+              v-loading="loading"
+              @row-click="handleRowClick"
+            >
+              <el-table-column label="名称" min-width="200">
+                <template #default="{ row }">
+                  <div class="document-name-cell">
+                    <el-icon v-if="row.isFolder">
+                      <FolderOpened />
+                    </el-icon>
+                    <el-icon v-else-if="row.type === 'docx' || row.type === 'pdf' || row.type === 'txt'">
+                      <Document />
+                    </el-icon>
+                    <el-icon v-else-if="row.type === 'xlsx'">
+                      <Files />
+                    </el-icon>
+                    <el-icon v-else-if="row.type === 'pptx'">
+                      <Collection />
+                    </el-icon>
+                    <el-icon v-else-if="row.type === 'png' || row.type === 'jpg' || row.type === 'gif'">
+                      <Picture />
+                    </el-icon>
+                    <el-icon v-else>
+                      <Document />
+                    </el-icon>
+                    <span :class="{'text-bold': row.isNew}">{{ row.name }}</span>
+                    <el-tag v-if="row.type === 'kb'" size="small" type="success">知识库</el-tag>
+                    <el-tag v-if="row.isNew" size="small" type="danger">新</el-tag>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="type" label="类型" width="120">
+                <template #default="{ row }">
+                  <span v-if="row.type === 'kb'">知识库</span>
+                  <span v-else>{{ getDocumentTypeName(row.type) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="size" label="大小" width="120" v-if="!isMobile">
+                <template #default="{ row }">
+                  <span v-if="row.isFolder || row.type === 'kb'">-</span>
+                  <span v-else>{{ (row.size / 1024).toFixed(2) }} KB</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="lastModified" label="修改时间" width="180" v-if="!isMobile">
+                <template #default="{ row }">
+                  {{ formatDate(row.lastModified, 'short') }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <el-dropdown trigger="click" @command="(command) => handleCommand(command, row)">
+                    <el-button size="small" type="primary" plain>
+                      操作<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item v-if="row.type !== 'kb'" command="download">
+                          <el-icon><Download /></el-icon> 下载
+                        </el-dropdown-item>
+                        <el-dropdown-item command="rename">
+                          <el-icon><Edit /></el-icon> 重命名
+                        </el-dropdown-item>
+                        <el-dropdown-item v-if="row.type !== 'kb'" command="move">
+                          <el-icon><Files /></el-icon> 移动
+                        </el-dropdown-item>
+                        <el-dropdown-item v-if="row.type !== 'kb'" command="share">
+                          <el-icon><Share /></el-icon> 分享
+                        </el-dropdown-item>
+                        <el-dropdown-item v-if="row.type !== 'kb'" command="version">
+                          <el-icon><Timer /></el-icon> 版本历史
+                        </el-dropdown-item>
+                        <el-dropdown-item v-if="row.type !== 'kb'" command="tag">
+                          <el-icon><Collection /></el-icon> 编辑标签
+                        </el-dropdown-item>
+                        <el-dropdown-item command="delete" divided>
+                          <el-icon><Delete /></el-icon> 删除
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </template>
+              </el-table-column>
+            </el-table>
+            
+            <!-- 文档网格视图 -->
+            <div v-else-if="viewMode === 'grid'" class="document-grid" v-loading="loading">
+              <el-card 
+                v-for="doc in currentLocationDocuments" 
+                :key="doc.id" 
+                shadow="hover" 
+                class="document-card"
+                @click="handleGridItemClick(doc)"
+              >
+                <template #header>
+                  <div class="card-header">
+                    <div class="document-icon">
+                      <el-icon v-if="doc.isFolder" :size="24">
+                        <FolderOpened />
+                      </el-icon>
+                      <el-icon v-else-if="doc.type === 'docx' || doc.type === 'pdf' || doc.type === 'txt'" :size="24">
+                        <Document />
+                      </el-icon>
+                      <el-icon v-else-if="doc.type === 'xlsx'" :size="24">
+                        <Files />
+                      </el-icon>
+                      <el-icon v-else-if="doc.type === 'pptx'" :size="24">
+                        <Collection />
+                      </el-icon>
+                      <el-icon v-else-if="doc.type === 'png' || doc.type === 'jpg' || doc.type === 'gif'" :size="24">
+                        <Picture />
+                      </el-icon>
+                      <el-icon v-else :size="24">
+                        <Document />
+                      </el-icon>
+                    </div>
+                    <el-dropdown trigger="click" @command="(command) => handleCommand(command, doc)">
+                      <el-button size="small" type="primary" text>
+                        <el-icon :size="16"><More /></el-icon>
+                      </el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu>
+                          <el-dropdown-item v-if="doc.type !== 'kb'" command="download">
+                            <el-icon><Download /></el-icon> 下载
+                          </el-dropdown-item>
+                          <el-dropdown-item command="rename">
+                            <el-icon><Edit /></el-icon> 重命名
+                          </el-dropdown-item>
+                          <el-dropdown-item v-if="doc.type !== 'kb'" command="move">
+                            <el-icon><Files /></el-icon> 移动
+                          </el-dropdown-item>
+                          <el-dropdown-item v-if="doc.type !== 'kb'" command="share">
+                            <el-icon><Share /></el-icon> 分享
+                          </el-dropdown-item>
+                          <el-dropdown-item v-if="doc.type !== 'kb'" command="version">
+                            <el-icon><Timer /></el-icon> 版本历史
+                          </el-dropdown-item>
+                          <el-dropdown-item v-if="doc.type !== 'kb'" command="tag">
+                            <el-icon><Collection /></el-icon> 编辑标签
+                          </el-dropdown-item>
+                          <el-dropdown-item command="delete" divided>
+                            <el-icon><Delete /></el-icon> 删除
+                          </el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </div>
+                </template>
+                <div class="card-content">
+                  <h4 :class="{'text-bold': doc.isNew}">{{ doc.name }}</h4>
+                  <div v-if="doc.type === 'kb'" class="knowledge-base-description">
+                    {{ doc.description || '无描述' }}
+                  </div>
+                  <div class="card-tags" v-if="doc.tags && doc.tags.length > 0">
+                    <el-tag v-if="doc.type === 'kb'" size="small" type="success">知识库</el-tag>
+                    <el-tag v-if="doc.isNew" size="small" type="danger">新</el-tag>
+                  </div>
+                  <div class="card-info">
+                    <span v-if="doc.type !== 'kb'">{{ getDocumentTypeName(doc.type) }}</span>
+                    <span v-if="!doc.isFolder && doc.type !== 'kb'"> · {{ (doc.size / 1024).toFixed(2) }} KB</span>
+                    <div>{{ formatDate(doc.lastModified) }}</div>
+                  </div>
+                </div>
+              </el-card>
+            </div>
+            
+            <!-- 分页 -->
+            <div class="pagination-container">
+              <el-pagination
+                v-model:current-page="currentPage"
+                v-model:page-size="pageSize"
+                :page-sizes="[10, 20, 50, 100]"
+                layout="total, sizes, prev, pager, next, jumper"
+                :total="currentLocationDocuments.length"
+                @size-change="handleSizeChange"
+                @current-change="handleCurrentChange"
               />
-            </el-col>
-            <el-col :span="4">
-              <el-select v-model="fileTypeFilter" placeholder="文件类型" clearable @change="filterDocuments">
-                <el-option label="所有类型" value="" />
-                <el-option label="文档 (Word/PDF)" value="document" />
-                <el-option label="表格 (Excel)" value="spreadsheet" />
-                <el-option label="演示文稿 (PPT)" value="presentation" />
-                <el-option label="图片" value="image" />
-                <el-option label="其他" value="other" />
-              </el-select>
-            </el-col>
-            <el-col :span="4">
-              <el-select v-model="categoryFilter" placeholder="分类" clearable @change="filterDocuments">
-                <el-option label="所有分类" value="" />
-                <el-option v-for="category in categories" :key="category.id" :label="category.name" :value="category.id" />
-              </el-select>
-            </el-col>
-            <el-col :span="4">
-              <el-select v-model="sortOption" placeholder="排序方式" @change="sortDocuments">
-                <el-option label="最近修改" value="lastModified" />
-                <el-option label="名称" value="name" />
-                <el-option label="大小" value="size" />
-                <el-option label="创建时间" value="createdAt" />
-              </el-select>
-            </el-col>
+            </div>
+          </el-tab-pane>
           
-          </el-row>
-          
-          <!-- 标签筛选区域 -->
-          <div class="tag-filter">
-            <span class="tag-label">标签：</span>
-            <el-tag 
-              v-for="tag in popularTags" 
-              :key="tag.id"
-              :type="selectedTags.includes(tag.id) ? '' : 'info'"
-              effect="plain"
-              class="tag-item"
-              @click="toggleTagFilter(tag.id)"
-            >
-              {{ tag.name }}
-            </el-tag>
-            <el-button link type="primary" @click="showAllTags">
-              更多标签...
-            </el-button>
-          </div>
-        </div>
-  
-        <!-- 文件路径导航 -->
-        <div class="file-path-nav">
-          <div class="path-nav-container">
-            <el-button 
-              v-if="currentPath.length > 0" 
-              size="small" 
-              icon="ArrowLeft" 
-              @click="navigateBack" 
-              class="back-button"
-            >
-              返回上一页
-            </el-button>
-            <el-breadcrumb separator="/">
-              <el-breadcrumb-item :to="{ path: '' }" @click="navigateToRoot">全部文件夹</el-breadcrumb-item>
-              <el-breadcrumb-item 
-                v-for="(folder, index) in currentPath" 
-                :key="index"
-                :to="{ path: '' }"
-                @click="navigateToPath(index)"
-              >
-                {{ folder.name }}
-              </el-breadcrumb-item>
-            </el-breadcrumb>
-          </div>
-        </div>
-        
-        <!-- 表格视图 -->
-        <el-table
-          v-if="viewMode === 'table'"
-          :data="currentLocationDocuments"
-          style="width: 100%"
-          @row-click="handleRowClick"
-          v-loading="loading"
-        >
-          <template #empty>
-            <el-empty :description="currentPath.length === 0 ? '暂无文件夹' : '暂无文档'" />
-          </template>
-          <el-table-column type="selection" width="55" />
-          <el-table-column label="名称" min-width="250">
-            <template #default="scope">
-              <div class="file-name-cell">
-                <el-icon :size="18" class="file-icon">
-                  <component :is="getFileTypeIcon(scope.row.type)"></component>
-                </el-icon>
-                <span>{{ scope.row.name }}</span>
-                <el-tag v-if="scope.row.isNew" size="small" type="success" effect="plain">新</el-tag>
-               
+          <el-tab-pane label="知识库" name="knowledge">
+            <!-- 知识库列表 -->
+            <div class="knowledge-bases-container" v-loading="knowledgeLoading">
+              <el-empty v-if="allKnowledge.length === 0" description="暂无知识库数据" />
+              <div v-else>
+                <el-collapse v-model="expandedKnowledgeBases">
+                  <el-collapse-item 
+                    v-for="kb in allKnowledge" 
+                    :key="kb.id" 
+                    :name="kb.id"
+                  >
+                    <template #title>
+                      <div class="knowledge-base-header">
+                        <h3>{{ kb.name }}</h3>
+                        <span class="knowledge-base-description">{{ kb.description || '无描述' }}</span>
+                      </div>
+                    </template>
+                    
+                    <div class="knowledge-base-actions">
+                      <el-button type="primary" size="small" @click="showAddKnowledgeDialog(kb.id)">
+                        <el-icon><Plus /></el-icon> 添加知识
+                      </el-button>
+                    </div>
+                    
+                    <el-table :data="kb.knowledges || []" style="width: 100%" class="knowledge-table">
+                      <el-table-column prop="title" label="标题" min-width="180" />
+                      <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip />
+                      <el-table-column prop="updateTime" label="更新时间" width="180">
+                        <template #default="{ row }">
+                          {{ formatDate(new Date(row.updateTime || row.createTime), 'short') }}
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="操作" width="220" fixed="right">
+                        <template #default="{ row }">
+                          <el-button-group>
+                            <el-button size="small" type="primary" @click="viewKnowledgeDetail(kb.id, row.id)">
+                              <el-icon><View /></el-icon> 查看
+                            </el-button>
+                            <el-button size="small" type="warning" @click="showEditKnowledgeDialog({
+                              kbid: kb.id,
+                              kid: row.id,
+                              title: row.title,
+                              content: row.content,
+                              description: row.description
+                            })">
+                              <el-icon><Edit /></el-icon> 编辑
+                            </el-button>
+                            <el-button 
+                              size="small" 
+                              type="danger" 
+                              @click="handleDeleteKnowledge(kb.id, row.id)">
+                              <el-icon><Delete /></el-icon> 删除
+                            </el-button>
+                          </el-button-group>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                  </el-collapse-item>
+                </el-collapse>
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="大小" width="120">
-            <template #default="scope">
-              {{ formatFileSize(scope.row.size) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="修改日期" width="180">
-            <template #default="scope">
-              {{ formatDate(scope.row.lastModified) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="分类" width="120">
-            <template #default="scope">
-              <el-tag size="small" effect="plain">{{ getCategoryName(scope.row.category) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="标签" min-width="200">
-            <template #default="scope">
-              <el-tag 
-                v-for="tagId in scope.row.tags" 
-                :key="tagId"
-                size="small"
-                class="tag-in-table"
-              >
-                {{ getTagName(tagId) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="知识摘要" width="80" v-if="!isMobile">
-            <template #default="scope">
-              <el-button 
-                v-if="!scope.row.isFolder && scope.row.summary" 
-                link 
-                type="primary" 
-                @click.stop="showKnowledgeSummary(scope.row)"
-              >
-                查看摘要
-                  </el-button>
-              <span v-else>-</span>
-                  </template>
-          </el-table-column>
-          <el-table-column label="版本" width="100">
-            <template #default="scope">
-              <el-button 
-                v-if="scope.row.versions && scope.row.versions.length > 1" 
-                link 
-                type="primary" 
-                @click.stop="showVersionHistory(scope.row)"
-              >
-                {{ scope.row.versions.length }} 个版本
-              </el-button>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="150">
-            <template #default="scope">
-              <div class="table-actions">
-                <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, scope.row)">
-                  <el-button size="small">
-                    操作<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                  </el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="download" v-if="!scope.row.isFolder">下载</el-dropdown-item>
-                      <el-dropdown-item command="rename">重命名</el-dropdown-item>
-                      <el-dropdown-item command="move">移动</el-dropdown-item>
-                      <el-dropdown-item command="share" v-if="!scope.row.isFolder">分享</el-dropdown-item>
-                      <el-dropdown-item command="version" v-if="!scope.row.isFolder">版本管理</el-dropdown-item>
-                      <el-dropdown-item command="tag">编辑标签</el-dropdown-item>
-                      <el-dropdown-item command="delete" divided type="danger">删除</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
-        
-       
-        
-        <!-- 分页控件 -->
-        <div class="pagination-container">
-          <el-pagination
-            v-model:current-page="currentPage"
-            v-model:page-size="pageSize"
-            :page-sizes="[10, 20, 50, 100]"
-            layout="total, sizes, prev, pager, next, jumper"
-            :total="currentLocationDocuments.length"
-            @size-change="handleSizeChange"
-            @current-change="handleCurrentChange"
-          />
-        </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
       </div>
   
       <!-- 上传文档对话框 -->
@@ -386,7 +588,7 @@
                 <div class="el-upload__tip">
                   支持上传Word、Excel、PPT、PDF等常见文档格式
                 </div>
-              </template>
+                  </template>
             </el-upload>
           </el-form-item>
           <el-form-item label="分类">
@@ -458,10 +660,10 @@
                 <div class="version-meta">
                   <span>{{ version.createdBy }}</span>
                   <span>大小: {{ formatFileSize(version.size) }}</span>
-          </div>
+              </div>
                 <div class="version-desc" v-if="version.description">
                   {{ version.description }}
-                </div>
+            </div>
               </div>
               <div class="version-actions">
                 <el-button size="small" type="primary" @click="previewVersion(version)">预览</el-button>
@@ -487,7 +689,7 @@
             </el-button>
           </div>
         </div>
-        
+  
         <!-- 协作与分享内容 -->
         <el-tabs v-model="sharingActiveTab" class="sharing-tabs">
           <!-- 我的分享标签页 -->
@@ -581,17 +783,17 @@
               </el-table>
               
               <!-- 分页控件 -->
-              <div class="pagination-container">
-                <el-pagination
+        <div class="pagination-container">
+          <el-pagination
                   v-model:current-page="shareCurrentPage"
                   v-model:page-size="sharePageSize"
                   :page-sizes="[10, 20, 50]"
-                  layout="total, sizes, prev, pager, next, jumper"
+            layout="total, sizes, prev, pager, next, jumper"
                   :total="totalSharesCount"
                   @size-change="handleShareSizeChange"
                   @current-change="handleShareCurrentChange"
-                />
-              </div>
+          />
+        </div>
             </div>
           </el-tab-pane>
           
@@ -708,7 +910,7 @@
                   :value="team.id"
                 />
               </el-select>
-            </el-form-item>
+          </el-form-item>
                 </template>
           
           <template v-if="shareForm.shareTargets.includes('community')">
@@ -769,7 +971,7 @@
           </el-form-item>
           
           <el-form-item label="访问密码" v-if="shareForm.shareTargets.includes('private') && !shareForm.isPublic">
-            <el-input
+            <el-input 
               v-model="shareForm.password"
               placeholder="可选，留空则不设置密码"
               show-password
@@ -810,7 +1012,7 @@
           </span>
         </template>
       </el-dialog>
-
+  
       <!-- 知识摘要对话框 -->
       <el-dialog
         v-model="knowledgeSummaryVisible"
@@ -838,7 +1040,7 @@
           <p class="edit-tags-hint">为"{{ currentDocument?.name || '' }}"添加或移除标签：</p>
           <el-select
             v-model="selectedDocumentTags"
-            multiple
+          multiple
             filterable
             allow-create
             default-first-option
@@ -866,15 +1068,15 @@
               >
                 {{ tag.name }}
               </el-tag>
-            </div>
           </div>
+            </div>
         </div>
         <template #footer>
           <span class="dialog-footer">
             <el-button @click="editTagsDialogVisible = false">取消</el-button>
             <el-button type="primary" @click="saveDocumentTags">保存</el-button>
           </span>
-        </template>
+          </template>
       </el-dialog>
 
       <!-- 移动文件对话框 -->
@@ -905,7 +1107,7 @@
           
           <div class="selected-path" v-if="selectedFolderId !== null">
             <p>已选择：<strong>{{ getSelectedFolderPath }}</strong></p>
-          </div>
+        </div>
         </div>
         <template #footer>
           <span class="dialog-footer">
@@ -914,7 +1116,7 @@
           </span>
         </template>
       </el-dialog>
-
+  
       <!-- 管理收藏对话框 -->
       <el-dialog
         v-model="manageFavoritesVisible"
@@ -1134,12 +1336,12 @@
                     <el-option label="高" value="high" />
                     <el-option label="中" value="medium" />
                     <el-option label="低" value="low" />
-                  </el-select>
-                </el-form-item>
+            </el-select>
+          </el-form-item>
                 <el-form-item label="估计时间">
                   <el-input-number v-model="newLearningItem.estimatedTime" :min="0.5" :step="0.5" style="width: 100%;" />
                   <span class="time-unit">小时</span>
-                </el-form-item>
+          </el-form-item>
                 
                 <div class="resources-section">
                   <div class="resources-header">
@@ -1147,7 +1349,7 @@
                     <el-button type="primary" size="small" @click="showAddResource = true">
                       <el-icon><Plus /></el-icon> 添加资源
                     </el-button>
-                  </div>
+            </div>
                   
                   <el-table v-if="newLearningItem.resources.length > 0" :data="newLearningItem.resources" style="width: 100%">
                     <el-table-column label="资源名称" prop="title" />
@@ -1174,7 +1376,7 @@
                       <el-form :model="newResource" label-width="100px">
                         <el-form-item label="资源名称" required>
                           <el-input v-model="newResource.title" placeholder="请输入资源名称" />
-                        </el-form-item>
+          </el-form-item>
                         <el-form-item label="资源类型">
                           <el-select v-model="newResource.type" placeholder="选择资源类型" style="width: 100%;">
                             <el-option label="网页链接" value="link" />
@@ -1182,7 +1384,7 @@
                             <el-option label="电子书" value="ebook" />
                             <el-option label="文档" value="document" />
                             <el-option label="其他" value="other" />
-                          </el-select>
+            </el-select>
                         </el-form-item>
                         <el-form-item label="资源链接">
                           <el-input v-model="newResource.url" placeholder="请输入资源链接" />
@@ -1193,13 +1395,13 @@
                             type="textarea" 
                             :rows="2" 
                             placeholder="请输入资源描述..." 
-                          />
-                        </el-form-item>
+            />
+          </el-form-item>
                         <el-form-item>
                           <el-button type="primary" @click="addResource">添加</el-button>
                           <el-button @click="showAddResource = false">取消</el-button>
-                        </el-form-item>
-                      </el-form>
+          </el-form-item>
+        </el-form>
                     </div>
                   </el-collapse-transition>
                 </div>
@@ -1221,28 +1423,180 @@
         </template>
       </el-dialog>
 
-    </div>
-  </div>
-</template>
+      <!-- 知识库创建/编辑对话框 -->
+      <el-dialog
+        v-model="knowledgeBaseDialogVisible"
+        :title="editingKnowledgeBase ? '编辑知识库' : '创建知识库'"
+        width="500px"
+        destroy-on-close
+      >
+        <el-form 
+          :model="knowledgeBaseForm" 
+          :rules="knowledgeBaseRules" 
+          ref="knowledgeBaseFormRef" 
+          label-width="100px"
+        >
+          <el-form-item label="知识库名称" prop="name">
+            <el-input v-model="knowledgeBaseForm.name" placeholder="请输入知识库名称" />
+          </el-form-item>
+          <el-form-item label="知识库描述" prop="description">
+            <el-input 
+              v-model="knowledgeBaseForm.description"
+              type="textarea" 
+              :rows="3" 
+              placeholder="请输入知识库描述..."
+            />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <div class="dialog-footer">
+            <el-button @click="knowledgeBaseDialogVisible = false">取消</el-button>
+            <el-button type="primary" @click="submitKnowledgeBase" :loading="submitLoading">
+              {{ editingKnowledgeBase ? '保存' : '创建' }}
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
 
+      <!-- 知识详情对话框 -->
+      <el-dialog
+        v-model="knowledgeDetailVisible"
+        title="知识详情"
+        width="800px"
+        destroy-on-close
+      >
+        <div v-if="currentKnowledgeDetail" class="knowledge-detail">
+          <h2>{{ currentKnowledgeDetail.title }}</h2>
+          <el-divider />
+          <p class="knowledge-description">{{ currentKnowledgeDetail.description }}</p>
+          <div class="knowledge-content" v-html="currentKnowledgeDetail.content"></div>
+        </div>
+        <template #footer>
+          <div class="dialog-footer">
+            <el-button @click="knowledgeDetailVisible = false">关闭</el-button>
+            <el-button 
+              type="warning" 
+              @click="showEditKnowledgeDialog({
+                kbid: currentKnowledgeBaseId,
+                kid: currentKnowledgeId,
+                title: currentKnowledgeDetail?.title,
+                content: currentKnowledgeDetail?.content,
+                description: currentKnowledgeDetail?.description
+              })">
+              编辑
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
+      
+      <!-- 知识预览对话框 -->
+      <el-dialog
+        v-model="knowledgePreviewVisible"
+        title="知识预览"
+        width="600px"
+        destroy-on-close
+      >
+        <div class="knowledge-preview" v-html="knowledgePreview"></div>
+        <template #footer>
+          <div class="dialog-footer">
+            <el-button @click="knowledgePreviewVisible = false">关闭</el-button>
+          </div>
+        </template>
+      </el-dialog>
+      
+      <!-- 知识创建/编辑对话框 -->
+      <el-dialog
+        v-model="knowledgeDialogVisible"
+        :title="knowledgeForm.kid ? '编辑知识' : '创建知识'"
+        width="700px"
+        destroy-on-close
+      >
+        <el-form 
+          :model="knowledgeForm" 
+          ref="knowledgeFormRef" 
+          label-width="100px"
+        >
+          <el-form-item label="标题" prop="title" :rules="[
+            { required: true, message: '请输入标题', trigger: 'blur' },
+            { min: 2, max: 100, message: '长度在2到100个字符之间', trigger: 'blur' }
+          ]">
+            <el-input v-model="knowledgeForm.title" placeholder="请输入知识标题" />
+          </el-form-item>
+          <el-form-item label="描述" prop="description" :rules="[
+            { required: true, message: '请输入描述', trigger: 'blur' }
+          ]">
+            <el-input 
+              v-model="knowledgeForm.description"
+              type="textarea" 
+              :rows="3" 
+              placeholder="请输入知识描述..."
+            />
+          </el-form-item>
+          <el-form-item label="内容" prop="content" :rules="[
+            { required: true, message: '请输入内容', trigger: 'blur' }
+          ]">
+            <el-input 
+              v-model="knowledgeForm.content"
+              type="textarea" 
+              :rows="10" 
+              placeholder="请输入知识内容..."
+            />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <div class="dialog-footer">
+            <el-button @click="knowledgeDialogVisible = false">取消</el-button>
+            <el-button type="primary" @click="submitKnowledge" :loading="submitLoading">
+              {{ knowledgeForm.kid ? '保存' : '创建' }}
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
+    </div>
+    </div>
+  </template>
+  
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue'
-  import { 
+import { 
   Plus, Refresh, Search, FolderOpened, Document, Calendar,
   Delete, Edit, Download, Share, Star, StarFilled,
   Picture, Collection, Link, Files, Lightning, Warning, Reading, Histogram,
   Upload, FolderAdd, List, Grid, ArrowDown, Timer,
   View, CopyDocument, Close
-  } from '@element-plus/icons-vue'
+} from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import { formatDistanceToNow, format, isAfter } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
+import { 
+  getKnowledgeBase, addKnowledgeBase, 
+  updataKnowledgeBase, deleteKnowledgeBase as deleteKnowledgeBaseApi 
+} from '@/api/knowledgebase'
+import {
+  getAllKnowledge, getKnowledgePreview, updateKnowledgePreview,
+  updateKnowledge, deleteKnowledge, searchKnowledge
+} from '@/api/knowledge'
 
 // 活动标签
 const activeTab = ref('dashboard')
+const documentActiveTab = ref('files') // 文档管理内的标签页
+
 const handleTabChange = (tab: string) => {
   activeTab.value = tab
+  // 当切换到文档管理标签页时，加载知识库数据
+  if (tab === 'documents') {
+    fetchKnowledgeBases()
+    fetchAllKnowledge() // 加载所有知识库及其知识
+  }
+}
+
+// 处理文档管理内标签页切换
+const handleDocumentTabChange = (tab: string) => {
+  documentActiveTab.value = tab
+  if (tab === 'knowledge') {
+    fetchAllKnowledge() // 切换到知识库标签时刷新数据
+  }
 }
 
 // 快捷入口数据
@@ -1572,6 +1926,12 @@ onMounted(() => {
   
   checkIsMobile()
   window.addEventListener('resize', checkIsMobile)
+  
+  // 如果初始标签为文档管理，则加载知识库数据
+  if (activeTab.value === 'documents') {
+    fetchKnowledgeBases()
+    fetchAllKnowledge() // 加载所有知识库及其知识
+  }
 })
 
 // 检查是否为移动设备
@@ -1935,6 +2295,10 @@ const getTagName = (tagId: number): string => {
 
 // 获取文件类型图标
 const getFileTypeIcon = (type: string): any => {
+  if (type === 'kb') {
+    return Collection
+  }
+  
   const iconMap: Record<string, any> = {
     'folder': FolderOpened,
     'docx': Document,
@@ -2030,90 +2394,110 @@ const handleGridItemClick = (doc: any) => {
 
 // 处理命令
 const handleCommand = (command: string, doc: any) => {
-  switch (command) {
-    case 'download':
-      console.log('下载文档:', doc.name)
-      ElMessage.success(`正在下载: ${doc.name}`)
-      // 实际应用中应下载文档
-      break
-    case 'rename':
-      console.log('重命名文档:', doc.name)
-      ElMessageBox.prompt('请输入新的名称', '重命名', {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        inputValue: doc.name
-      }).then(({ value }) => {
-        ElMessage.success(`已将 "${doc.name}" 重命名为 "${value}"`)
-        // 实际应用中应调用API重命名文档
-      }).catch(() => {})
-      break
-    case 'move':
-      console.log('移动文档:', doc.name)
-      showMoveDialog(doc)
-      break
-    case 'share':
-      console.log('分享文档:', doc.name)
-      // 打开分享对话框
-      shareDialogVisible.value = true
-      shareForm.contentType = doc.isFolder ? 'folder' : 'document'
-      shareForm.contentId = doc.id
-      shareForm.shareTargets = ['private'] // 默认选择个人链接
-      shareForm.teamId = ''
-      shareForm.communityCategory = ''
-      shareForm.communityTags = []
-      shareForm.isPublic = true
-      shareForm.expiryOption = '7days'
-      shareForm.expiryDate = new Date()
-      shareForm.password = ''
-      shareForm.sharedUsers = []
-      shareForm.description = doc.name // 默认使用文档名称作为描述
-      break
-    case 'version':
-      console.log('查看版本历史:', doc.name)
-      showVersionHistory(doc)
-      break
-    case 'tag':
-      console.log('编辑标签:', doc.name)
-      showEditTagsDialog(doc)
-      break
-    case 'delete':
-      console.log('删除文档:', doc.name)
-      ElMessageBox.confirm(`确定要删除 "${doc.name}" 吗？`, '警告', {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }).then(() => {
-        // 从文档列表中删除该文档
-        const index = documents.value.findIndex(item => item.id === doc.id)
-        if (index !== -1) {
-          documents.value.splice(index, 1)
-          ElMessage.success(`已删除: ${doc.name}`)
-          
-          // 如果删除的是文件夹，同时删除其中的文件
-          if (doc.isFolder) {
-            // 递归找出所有子文件和子文件夹并删除
-            const removeChildrenRecursively = (parentId: number) => {
-              const children = documents.value.filter(item => item.parentId === parentId)
-              for (const child of children) {
-                // 如果子项是文件夹，递归删除它的内容
-                if (child.isFolder) {
-                  removeChildrenRecursively(child.id)
-                }
-                
-                // 从文档列表中删除这个子项
-                const childIndex = documents.value.findIndex(item => item.id === child.id)
-                if (childIndex !== -1) {
-                  documents.value.splice(childIndex, 1)
+  if (doc.type === 'kb') {
+    // 知识库特定操作
+    switch (command) {
+      case 'rename':
+        showKnowledgeBaseDialog(doc)
+        break
+      case 'delete':
+        ElMessageBox.confirm(`确定要删除知识库"${doc.name}"吗？此操作不可撤销。`, '删除确认', {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }).then(() => {
+          handleDeleteKnowledgeBase(doc)
+        }).catch(() => {})
+        break
+      default:
+        ElMessage.info(`知识库不支持该操作: ${command}`)
+    }
+  } else {
+    switch (command) {
+      case 'download':
+        console.log('下载文档:', doc.name)
+        ElMessage.success(`正在下载: ${doc.name}`)
+        // 实际应用中应下载文档
+        break
+      case 'rename':
+        console.log('重命名文档:', doc.name)
+        ElMessageBox.prompt('请输入新的名称', '重命名', {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          inputValue: doc.name
+        }).then(({ value }) => {
+          ElMessage.success(`已将 "${doc.name}" 重命名为 "${value}"`)
+          // 实际应用中应调用API重命名文档
+        }).catch(() => {})
+        break
+      case 'move':
+        console.log('移动文档:', doc.name)
+        showMoveDialog(doc)
+        break
+      case 'share':
+        console.log('分享文档:', doc.name)
+        // 打开分享对话框
+        shareDialogVisible.value = true
+        shareForm.contentType = doc.isFolder ? 'folder' : 'document'
+        shareForm.contentId = doc.id
+        shareForm.shareTargets = ['private'] // 默认选择个人链接
+        shareForm.teamId = ''
+        shareForm.communityCategory = ''
+        shareForm.communityTags = []
+        shareForm.isPublic = true
+        shareForm.expiryOption = '7days'
+        shareForm.expiryDate = new Date()
+        shareForm.password = ''
+        shareForm.sharedUsers = []
+        shareForm.description = doc.name // 默认使用文档名称作为描述
+        break
+      case 'version':
+        console.log('查看版本历史:', doc.name)
+        showVersionHistory(doc)
+        break
+      case 'tag':
+        console.log('编辑标签:', doc.name)
+        showEditTagsDialog(doc)
+        break
+      case 'delete':
+        console.log('删除文档:', doc.name)
+        ElMessageBox.confirm(`确定要删除 "${doc.name}" 吗？`, '警告', {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }).then(() => {
+          // 从文档列表中删除该文档
+          const index = documents.value.findIndex(item => item.id === doc.id)
+          if (index !== -1) {
+            documents.value.splice(index, 1)
+            ElMessage.success(`已删除: ${doc.name}`)
+            
+            // 如果删除的是文件夹，同时删除其中的文件
+            if (doc.isFolder) {
+              // 递归找出所有子文件和子文件夹并删除
+              const removeChildrenRecursively = (parentId: number) => {
+                const children = documents.value.filter(item => item.parentId === parentId)
+                for (const child of children) {
+                  // 如果子项是文件夹，递归删除它的内容
+                  if (child.isFolder) {
+                    removeChildrenRecursively(child.id)
+                  }
+                  
+                  // 从文档列表中删除这个子项
+                  const childIndex = documents.value.findIndex(item => item.id === child.id)
+                  if (childIndex !== -1) {
+                    documents.value.splice(childIndex, 1)
+                  }
                 }
               }
+              
+              removeChildrenRecursively(doc.id)
             }
-            
-            removeChildrenRecursively(doc.id)
           }
-        }
-        // 实际应用中应调用API删除文档
-      }).catch(() => {})
-      break
+          // 实际应用中应调用API删除文档
+        }).catch(() => {})
+        break
+    }
   }
 }
 
@@ -2163,7 +2547,7 @@ const createNewFolder = () => {
   ElMessageBox.prompt('请输入文件夹名称', '新建文件夹', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
-    inputValue: '新建文件夹'
+    inputValue: ''
   }).then(({ value }) => {
     if (value.trim()) {
       // 创建新文件夹对象
@@ -2567,7 +2951,7 @@ const showShareContentDialog = () => {
   shareForm.expiryDate = new Date()
   shareForm.password = ''
   shareForm.sharedUsers = []
-  shareForm.description = ''
+  shareForm.description = doc.name // 默认使用文档名称作为描述
 }
 
 // 处理分享内容
@@ -2923,7 +3307,7 @@ const showManageFavorites = () => {
   setTimeout(() => {
     favoritesLoading.value = false
   }, 500)
-}
+  }
 
 // 获取文档类型名称
 const getDocumentTypeName = (type: string): string => {
@@ -3868,9 +4252,447 @@ const getResourceTypeText = (type: string) => {
   }
 }
 
+// 知识库相关数据和方法
+const knowledgeBases = ref<any[]>([])
+const expandedKnowledgeBases = ref<number[]>([]) // 展开的知识库ID
+const knowledgeBaseDialogVisible = ref(false)
+const editingKnowledgeBase = ref<any>(null)
+const knowledgeBaseFormRef = ref<any>(null)
+const knowledgeBaseForm = reactive({
+  id: '',
+  name: '',
+  description: ''
+})
+const knowledgeBaseRules = {
+  name: [
+    { required: true, message: '请输入知识库名称', trigger: 'blur' },
+    { min: 2, max: 50, message: '长度应为2到50个字符', trigger: 'blur' }
+  ]
+}
+const submitLoading = ref(false)
 
+// 获取所有知识库
+const fetchKnowledgeBases = async () => {
+  loading.value = true
+  try {
+    const response = await getKnowledgeBase()
+    console.log('获取知识库响应:', response)
+    
+    if (response.data && response.data.code === 200) {
+      knowledgeBases.value = response.data.data || []
+      // 将知识库数据转换为文档格式，便于在现有UI中展示
+      const kbDocuments = knowledgeBases.value.map(kb => ({
+        id: kb.id,
+        name: kb.name,
+        type: 'kb',
+        size: 0,
+        lastModified: new Date(kb.updateTime || kb.createTime),
+        createdAt: new Date(kb.createTime),
+        category: 1, // 默认分类
+        tags: [10], // 默认知识库标签
+        isFolder: true,
+        isNew: false,
+        parentId: null,
+        summary: kb.description || '知识库',
+        versions: [],
+        description: kb.description
+      }))
+      
+      // 将知识库数据添加到文档列表中
+      documents.value = [...kbDocuments, ...documents.value.filter(doc => doc.type !== 'kb')]
+    } else {
+      ElMessage.error(response.data?.msg || '获取知识库失败')
+    }
+  } catch (error) {
+    console.error('获取知识库出错:', error)
+  } finally {
+    loading.value = false
+  }
+}
 
-  </script>
+// 显示知识库创建/编辑对话框
+const showKnowledgeBaseDialog = (doc?: any) => {
+  if (doc && doc.type === 'kb') {
+    // 编辑知识库
+    editingKnowledgeBase.value = doc
+    knowledgeBaseForm.id = doc.id
+    knowledgeBaseForm.name = doc.name
+    knowledgeBaseForm.description = doc.description || doc.summary || ''
+  } else {
+    // 创建新知识库
+    editingKnowledgeBase.value = null
+    knowledgeBaseForm.id = ''
+    knowledgeBaseForm.name = ''
+    knowledgeBaseForm.description = ''
+  }
+  knowledgeBaseDialogVisible.value = true
+}
+
+// 提交知识库表单（创建或更新）
+const submitKnowledgeBase = async () => {
+  if (!knowledgeBaseFormRef.value) return
+  
+  try {
+    await knowledgeBaseFormRef.value.validate()
+    submitLoading.value = true
+    
+    if (editingKnowledgeBase.value) {
+      // 更新知识库
+      const data = {
+        id: knowledgeBaseForm.id,
+        name: knowledgeBaseForm.name,
+        description: knowledgeBaseForm.description
+      }
+      const response = await updataKnowledgeBase(data)
+      if (response.data && response.data.code === 200) {
+        ElMessage.success('知识库更新成功')
+        fetchKnowledgeBases() // 刷新列表
+        knowledgeBaseDialogVisible.value = false
+      } else {
+        ElMessage.error(response.data?.msg || '知识库更新失败')
+      }
+    } else {
+      // 创建知识库
+      const data = {
+        name: knowledgeBaseForm.name,
+        description: knowledgeBaseForm.description
+      }
+      const response = await addKnowledgeBase(data)
+      if (response.data && response.data.code === 200) {
+        ElMessage.success('知识库创建成功')
+        fetchKnowledgeBases() // 刷新列表
+        knowledgeBaseDialogVisible.value = false
+      } else {
+        ElMessage.error(response.data?.msg || '知识库创建失败')
+      }
+    }
+  } catch (error) {
+    console.error('提交知识库表单出错:', error)
+    ElMessage.error('表单验证失败，请检查输入')
+  } finally {
+    submitLoading.value = false
+  }
+}
+
+// 删除知识库
+const handleDeleteKnowledgeBase = async (doc: any) => {
+  try {
+    loading.value = true
+    const response = await deleteKnowledgeBaseApi(doc.id)
+    if (response.data && response.data.code === 200) {
+      ElMessage.success('知识库删除成功')
+      fetchKnowledgeBases() // 刷新列表
+    } else {
+      ElMessage.error(response.data?.msg || '知识库删除失败')
+    }
+  } catch (error) {
+    console.error('删除知识库出错:', error)
+    ElMessage.error('删除知识库出错')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 在原有菜单上添加创建知识库功能
+const createNewKnowledgeBase = () => {
+  showKnowledgeBaseDialog()
+}
+
+// 在组件初始化时加载知识库数据
+onMounted(() => {
+  // 其他初始化代码
+  
+  // 如果初始标签为文档管理，则加载知识库数据
+  if (activeTab.value === 'documents') {
+    fetchKnowledgeBases()
+    fetchAllKnowledge() // 加载所有知识库及其知识
+  }
+})
+
+// 知识相关数据
+const allKnowledge = ref<any[]>([]) // 所有知识库及其知识
+const currentKnowledgeBaseId = ref<number | null>(null) // 当前选中的知识库ID
+const currentKnowledgeId = ref<number | null>(null) // 当前选中的知识ID
+const knowledgeLoading = ref(false) // 知识加载状态
+const knowledgeDetailVisible = ref(false) // 知识详情对话框可见性
+const currentKnowledgeDetail = ref<any>(null) // 当前查看的知识详情
+const knowledgeDialogVisible = ref(false) // 知识编辑对话框可见性
+const knowledgeFormRef = ref<any>(null) // 知识表单引用
+const knowledgeForm = reactive({ // 知识表单数据
+  kbid: '',
+  kid: '',
+  title: '',
+  content: '',
+  description: ''
+})
+const knowledgePreviewVisible = ref(false) // 知识预览对话框可见性
+const knowledgePreview = ref('') // 知识预览内容
+
+// 获取所有知识库及其知识
+const fetchAllKnowledge = async () => {
+  try {
+    knowledgeLoading.value = true
+    const response = await getAllKnowledge()
+    console.log('获取所有知识响应:', response)
+    
+    if (response.data && response.data.code === 200) {
+      allKnowledge.value = response.data.data || []
+      ElMessage.success('知识库数据加载成功')
+    } else {
+      console.error('获取知识API返回错误:', response.data)
+      ElMessage.error(response.data?.msg || '获取知识库数据失败')
+    }
+  } catch (error) {
+    console.error('获取知识出错:', error)
+    ElMessage.error('系统错误，无法获取知识列表')
+  } finally {
+    knowledgeLoading.value = false
+  }
+}
+
+// 查看知识库详情
+const viewKnowledgeBaseDetail = async (kbId: number) => {
+  try {
+    knowledgeLoading.value = true
+    currentKnowledgeBaseId.value = kbId
+    
+    const response = await getKnowledgeBaseDetail(kbId)
+    console.log('获取知识库详情响应:', response)
+    
+    if (response.data && response.data.code === 200) {
+      const knowledgeList = response.data.data || []
+      // 在这里可以更新UI，显示知识库下的知识列表
+      ElMessage.success('知识库详情加载成功')
+    } else {
+      console.error('获取知识库详情API返回错误:', response.data)
+      ElMessage.error(response.data?.msg || '获取知识库详情失败')
+    }
+  } catch (error) {
+    console.error('获取知识库详情出错:', error)
+    ElMessage.error('系统错误，无法获取知识库详情')
+  } finally {
+    knowledgeLoading.value = false
+  }
+}
+
+// 查看知识详情
+const viewKnowledgeDetail = async (kbId: number, kId: number) => {
+  try {
+    knowledgeLoading.value = true
+    currentKnowledgeBaseId.value = kbId
+    currentKnowledgeId.value = kId
+    
+    const response = await getKnowledgeDetail(kbId, kId)
+    console.log('获取知识详情响应:', response)
+    
+    if (response.data && response.data.code === 200) {
+      currentKnowledgeDetail.value = response.data.data
+      knowledgeDetailVisible.value = true
+      ElMessage.success('知识详情加载成功')
+    } else {
+      console.error('获取知识详情API返回错误:', response.data)
+      ElMessage.error(response.data?.msg || '获取知识详情失败')
+    }
+  } catch (error) {
+    console.error('获取知识详情出错:', error)
+    ElMessage.error('系统错误，无法获取知识详情')
+  } finally {
+    knowledgeLoading.value = false
+  }
+}
+
+// 查看知识预览
+const viewKnowledgePreview = async (kbId: number, kId: number) => {
+  try {
+    knowledgeLoading.value = true
+    
+    const response = await getKnowledgePreview({
+      kbid: kbId,
+      kid: kId
+    })
+    console.log('获取知识预览响应:', response)
+    
+    if (response.data && response.data.code === 200) {
+      knowledgePreview.value = response.data.data || ''
+      knowledgePreviewVisible.value = true
+      ElMessage.success('知识预览加载成功')
+    } else {
+      console.error('获取知识预览API返回错误:', response.data)
+      ElMessage.error(response.data?.msg || '获取知识预览失败')
+    }
+  } catch (error) {
+    console.error('获取知识预览出错:', error)
+    ElMessage.error('系统错误，无法获取知识预览')
+  } finally {
+    knowledgeLoading.value = false
+  }
+}
+
+// 显示添加知识对话框
+const showAddKnowledgeDialog = (kbId: number) => {
+  knowledgeForm.kbid = kbId.toString()
+  knowledgeForm.kid = ''
+  knowledgeForm.title = ''
+  knowledgeForm.content = ''
+  knowledgeForm.description = ''
+  knowledgeDialogVisible.value = true
+}
+
+// 显示编辑知识对话框
+const showEditKnowledgeDialog = (knowledge: any) => {
+  knowledgeForm.kbid = knowledge.kbid.toString()
+  knowledgeForm.kid = knowledge.kid.toString()
+  knowledgeForm.title = knowledge.title
+  knowledgeForm.content = knowledge.content
+  knowledgeForm.description = knowledge.description
+  knowledgeDialogVisible.value = true
+}
+
+// 提交知识表单（添加或更新）
+const submitKnowledge = async () => {
+  if (!knowledgeFormRef.value) return
+  
+  try {
+    await knowledgeFormRef.value.validate()
+    submitLoading.value = true
+    
+    if (knowledgeForm.kid) {
+      // 更新知识
+      const data = {
+        kbid: parseInt(knowledgeForm.kbid),
+        kid: parseInt(knowledgeForm.kid),
+        title: knowledgeForm.title,
+        content: knowledgeForm.content,
+        description: knowledgeForm.description
+      }
+      const response = await updateKnowledge(data)
+      if (response.data && response.data.code === 200) {
+        ElMessage.success('知识更新成功')
+        fetchAllKnowledge() // 刷新知识列表
+        knowledgeDialogVisible.value = false
+      } else {
+        ElMessage.error(response.data?.msg || '知识更新失败')
+      }
+    } else {
+      // 添加知识
+      const data = {
+        kbid: parseInt(knowledgeForm.kbid),
+        title: knowledgeForm.title,
+        content: knowledgeForm.content,
+        description: knowledgeForm.description
+      }
+      const response = await addKnowledge(data)
+      if (response.data && response.data.code === 200) {
+        ElMessage.success('知识添加成功')
+        fetchAllKnowledge() // 刷新知识列表
+        knowledgeDialogVisible.value = false
+      } else {
+        ElMessage.error(response.data?.msg || '知识添加失败')
+      }
+    }
+  } catch (error) {
+    console.error('提交知识表单出错:', error)
+    ElMessage.error('表单验证失败，请检查输入')
+  } finally {
+    submitLoading.value = false
+  }
+}
+
+// 删除知识
+const handleDeleteKnowledge = async (kbId: number, kId: number) => {
+  try {
+    ElMessageBox.confirm('确定要删除这条知识吗？此操作不可撤销。', '删除确认', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }).then(async () => {
+      knowledgeLoading.value = true
+      const response = await deleteKnowledge({
+        kbid: kbId,
+        kid: kId
+      })
+      if (response.data && response.data.code === 200) {
+        ElMessage.success('知识删除成功')
+        fetchAllKnowledge() // 刷新知识列表
+      } else {
+        ElMessage.error(response.data?.msg || '知识删除失败')
+      }
+      knowledgeLoading.value = false
+    }).catch(() => {
+      // 取消删除
+    })
+  } catch (error) {
+    console.error('删除知识出错:', error)
+    ElMessage.error('删除知识出错')
+    knowledgeLoading.value = false
+  }
+}
+
+// 全局搜索关键词
+const globalSearchKeyword = ref('')
+const searchResultsVisible = ref(false)
+const searchLoading = ref(false)
+const searchResults = ref([])
+
+// 处理全局搜索
+const handleGlobalSearch = async () => {
+  if (!globalSearchKeyword.value.trim()) {
+    ElMessage.warning('请输入搜索关键词')
+    return
+  }
+
+  searchLoading.value = true
+  searchResultsVisible.value = true
+
+  try {
+    // 调用搜索API
+    const res = await searchKnowledge(globalSearchKeyword.value, 1) // 使用空间ID=1表示个人空间
+    if (res.data && res.data.code === 200) {
+      searchResults.value = res.data.data || []
+      if (searchResults.value.length === 0) {
+        ElMessage.info('未找到相关内容')
+      }
+    } else {
+      ElMessage.error(res.data?.msg || '搜索失败')
+      searchResults.value = []
+    }
+  } catch (error) {
+    console.error('搜索出错:', error)
+    ElMessage.error('网络错误，搜索失败')
+    searchResults.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+// 查看搜索结果
+const viewSearchResult = (result: any) => {
+  // 根据结果类型执行不同的操作
+  if (result.type === 'document' || result.type === 'md') {
+    // 显示文档详情
+    currentDocument.value = result
+    knowledgeSummaryVisible.value = true
+    currentKnowledgeSummary.value = result.summary || result.content || '无内容预览'
+  } else if (result.type === 'kb') {
+    // 显示知识库详情
+    showKnowledgeBaseDialog(result)
+  } else {
+    // 其他类型，打开详情
+    ElMessage.info(`查看 ${result.title || result.name}`)
+  }
+}
+
+// 获取搜索结果类型标签
+const getResultTypeTag = (type: string) => {
+  switch (type) {
+    case 'document': return 'success'
+    case 'folder': return 'info'
+    case 'md': return 'success'
+    case 'kb': return 'warning'
+    default: return 'info'
+  }
+}
+</script>
   
 <style lang="scss" scoped>
 /* 整体布局 */
@@ -3887,9 +4709,9 @@ const getResourceTypeText = (type: string) => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   padding: 0 20px;
   height: 60px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   z-index: 10;
 }
 
@@ -3898,7 +4720,7 @@ const getResourceTypeText = (type: string) => {
 }
 
 .logo-section h2 {
-    margin: 0;
+  margin: 0;
   font-size: 20px;
   font-weight: 600;
   color: #409EFF;
@@ -4875,9 +5697,150 @@ const getResourceTypeText = (type: string) => {
   color: #409eff;
 }
 
+.toolbar {
+  margin-bottom: 20px;
+}
 
+.card-info {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #666;
+}
 
+.card-tags {
+  margin-top: 10px;
+}
 
+.document-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 15px;
+  margin-top: 20px;
+}
+
+/* 知识库相关样式 */
+.document-tabs {
+  margin-top: 20px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.knowledge-base-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.knowledge-base-description {
+  color: #606266;
+  font-size: 14px;
+}
+
+.knowledge-base-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.knowledge-detail h2 {
+  color: #303133;
+  margin-top: 0;
+}
+
+.knowledge-description {
+  color: #606266;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.knowledge-content {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #333;
+}
+
+.knowledge-preview {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  background-color: #f8f9fa;
+}
+
+/* 全局搜索框 */
+.global-search {
+  width: 300px;
+  margin-left: 20px;
+}
+
+/* 搜索结果抽屉 */
+.search-results-content {
+  padding: 20px;
+  background-color: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
+}
+
+/* 搜索信息 */
+.search-info {
+  margin-bottom: 20px;
+  font-size: 14px;
+  color: #606266;
+}
+
+/* 搜索结果列表 */
+.search-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+/* 搜索结果项 */
+.search-result-item {
+  border: 1px solid #EBEEF5;
+  border-radius: 4px;
+  padding: 10px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+/* 搜索结果项悬停效果 */
+.search-result-item:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 16px 0 rgba(0, 0, 0, 0.1);
+}
+
+/* 搜索结果标题 */
+.result-header h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: #303133;
+}
+
+/* 搜索结果内容 */
+.result-content {
+  margin-top: 5px;
+  font-size: 14px;
+  color: #606266;
+}
+
+/* 搜索结果元数据 */
+.result-meta {
+  margin-top: 5px;
+  font-size: 12px;
+  color: #909399;
+}
   </style>
 
 

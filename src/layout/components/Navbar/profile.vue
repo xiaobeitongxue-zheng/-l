@@ -1,12 +1,12 @@
 <template>
   <div class="profile-container">
-    <el-card class="profile-card" :body-style="{ padding: '30px' }">
+    <el-card class="profile-card" :body-style="{ padding: '30px' }" v-loading="loading">
       <div class="avatar-section">
         <div class="avatar-wrapper">
-          <el-avatar :size="60" :src="avatarUrl" @click="triggerFileInput" />
-          <el-button circle class="edit-avatar" icon="Edit" type="primary" size="small" @click="triggerFileInput"></el-button>
+          <el-avatar :size="60" :src="avatarUrl" @click="isEditMode && triggerFileInput" :class="{ 'avatar-editable': isEditMode }" />
+          <el-button v-if="isEditMode" circle class="edit-avatar" icon="Edit" type="primary" size="small" @click="triggerFileInput"></el-button>
         </div>
-        <p>点击头像可以上传本地图片</p>
+        <p v-if="isEditMode">点击头像可以上传本地图片</p>
         <!-- 隐藏的文件输入 -->
         <input
           type="file"
@@ -31,35 +31,54 @@
       </el-dialog>
 
       <el-form label-width="100px" class="profile-form">
-        <el-form-item label="姓名" required>
-          <el-input v-model="profile.name"></el-input>
+        <el-form-item label="用户ID">
+          <el-input v-model="profile.id" disabled></el-input>
         </el-form-item>
-        <el-form-item label="电子邮箱" required>
-          <el-input v-model="profile.email"></el-input>
+        
+        <el-form-item label="用户名" required>
+          <el-input v-model="profile.username" :disabled="!isEditMode"></el-input>
         </el-form-item>
-        <el-form-item label="手机号码">
-          <el-input v-model="profile.phone"></el-input>
+        
+        <el-form-item label="密码" required v-if="isEditMode">
+          <el-input v-model="profile.password" type="password" show-password placeholder="输入新密码修改，留空则不修改"></el-input>
         </el-form-item>
-        <el-form-item label="性别" required>
-          <el-radio-group v-model="profile.gender">
-            <el-radio label="男">男</el-radio>
-            <el-radio label="女">女</el-radio>
-            <el-radio label="其他">其他</el-radio>
-          </el-radio-group>
+        
+        <el-form-item label="电子邮箱">
+          <el-input v-model="profile.email" :disabled="!isEditMode"></el-input>
         </el-form-item>
-        <el-form-item label="生日" required>
-          <el-date-picker v-model="profile.birthday" type="date" placeholder="选择日期"></el-date-picker>
+        
+        <el-form-item label="手机号码" required>
+          <el-input v-model="profile.phone" :disabled="!isEditMode"></el-input>
         </el-form-item>
-        <el-form-item label="个人简介">
-          <el-input type="textarea" v-model="profile.bio" rows="3"></el-input>
+        
+        <el-form-item label="团队ID">
+          <el-input v-model="profile.teamId" disabled></el-input>
         </el-form-item>
-        <el-form-item label="地址">
-          <el-input v-model="profile.address"></el-input>
+        
+        <el-form-item label="创建时间">
+          <el-input v-model="profile.createTime" disabled></el-input>
         </el-form-item>
+        
+        <el-form-item label="更新时间">
+          <el-input v-model="profile.updateTime" disabled></el-input>
+        </el-form-item>
+        
+        <el-form-item label="用户状态">
+          <el-tag :type="profile.status === 1 ? 'success' : 'danger'">
+            {{ profile.status === 1 ? '正常' : '禁用' }}
+          </el-tag>
+        </el-form-item>
+      
         <el-form-item class="buttons-container">
           <div class="buttons-wrapper">
-            <el-button type="primary" @click="saveProfile">保存修改</el-button>
-            <el-button @click="cancelEdit">取消</el-button>
+            <template v-if="!isEditMode">
+              <el-button type="primary" @click="enableEditMode">编辑信息</el-button>
+              <el-button @click="goBack">返回</el-button>
+            </template>
+            <template v-else>
+              <el-button type="primary" @click="saveProfile" :loading="loading">保存修改</el-button>
+              <el-button @click="cancelEdit">取消</el-button>
+            </template>
           </div>
         </el-form-item>
       </el-form>
@@ -68,21 +87,103 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRouter } from 'vue-router';
 import userStore from '@/store/user';
+import { getUserInfo as apiGetUserInfo, updateUserInfo as apiUpdateUserInfo } from '@/api/user';
+// 保留request用于头像上传等其他可能的API调用
+import request from '@/utils/request81.ts';
 
 const router = useRouter();
 
+// 编辑模式状态
+const isEditMode = ref(false);
+
+// 启用编辑模式
+const enableEditMode = () => {
+  isEditMode.value = true;
+};
+
+// 返回首页
+const goBack = () => {
+  router.push('/layout');
+};
+
+// 用户个人信息
 const profile = ref({
-  name: '千寻',
-  email: 'zhangsan@bjtu.edu.cn',
-  phone: '13800138000',
-  gender: '女',
-  birthday: '2000-01-01',
-  bio: '我是一名软件工程师，喜欢编程和旅行。在空闲时间，我喜欢阅读和学习新技术。',
-  address: '北京市海淀区上园村3号',
+  id: '',
+  username: '',
+  email: '',
+  phone: '',
+  password: '',
+  teamId: 0,
+  createTime: '',
+  updateTime: '',
+  status: 1,
+  deleteFlag: 0
+});
+
+// 备份初始数据，用于取消编辑时恢复
+const initialProfile = ref({});
+
+// 加载状态
+const loading = ref(false);
+
+// 获取用户信息
+const getUserInfo = async () => {
+  loading.value = true;
+  try {
+    const response = await apiGetUserInfo();
+    
+    if (response.data && response.data.code === 200) {
+      const userData = response.data.data;
+      console.log('获取到的用户信息:', userData);
+      
+      // 更新表单数据，使用数据库表字段名称
+      profile.value.id = userData.id || userData.user_id || '';
+      profile.value.username = userData.username || '';
+      profile.value.email = userData.email || '';
+      profile.value.phone = userData.phone || '';
+      profile.value.teamId = userData.teamId || 0;
+      profile.value.createTime = userData.createTime || userData.create_time || '';
+      profile.value.updateTime = userData.updateTime || userData.update_time || '';
+      profile.value.status = userData.status || 1;
+      profile.value.deleteFlag = userData.deleteFlag || userData.delete_flag || 0;
+      
+      // 不要从API获取密码
+      profile.value.password = '';
+      
+      // 更新头像
+      if (userData.avatar) {
+        avatarUrl.value = userData.avatar;
+      }
+      
+      // 将用户ID保存到localStorage
+      if (userData.id || userData.user_id) {
+        const userId = userData.id || userData.user_id;
+        localStorage.setItem('uid', userId.toString());
+        console.log('已保存用户ID:', userId);
+      }
+
+      // 备份初始数据
+      initialProfile.value = JSON.parse(JSON.stringify(profile.value));
+    } else {
+      ElMessage.error('获取用户信息失败');
+    }
+  } catch (error) {
+    console.error('获取用户信息出错', error);
+    ElMessage.error('获取用户信息出错');
+  } finally {
+    loading.value = false;
+  }
+};
+
+// 组件挂载时获取用户信息
+onMounted(() => {
+  getUserInfo();
+  // 初始状态为非编辑模式
+  isEditMode.value = false;
 });
 
 // 头像相关
@@ -94,7 +195,7 @@ const avatarUpdated = ref(false); // 跟踪头像是否已更新
 
 // 触发文件选择
 const triggerFileInput = () => {
-  if (fileInput.value) {
+  if (fileInput.value && isEditMode.value) {
     fileInput.value.click();
   }
 };
@@ -139,34 +240,116 @@ const cancelUpload = () => {
 };
 
 // 确认上传
-const confirmUpload = () => {
+const confirmUpload = async () => {
   // 在实际应用中，这里应该调用API上传图片到服务器
   // 现在我们只是将临时URL设置为当前头像
   avatarUrl.value = tempAvatarUrl.value;
   avatarUpdated.value = true; // 标记头像已更新
   dialogVisible.value = false;
+  
+  // 直接更新store中的头像，确保实时更新到导航栏
+  userStore.updateAvatar(tempAvatarUrl.value);
+  
+  // 更新localStorage，确保刷新页面后仍能保持
+  localStorage.setItem('avatar', tempAvatarUrl.value);
+  
+  // 触发全局事件，通知其他组件（如导航栏）更新头像
+  window.dispatchEvent(new CustomEvent('avatar-updated', { 
+    detail: { avatar: tempAvatarUrl.value } 
+  }));
+  
   ElMessage.success('头像已更新，请点击"保存修改"保存所有更改');
 };
 
-const saveProfile = () => {
-  // 如果头像已更新，则更新store中的头像
-  if (avatarUpdated.value) {
-    userStore.updateAvatar(avatarUrl.value);
-    avatarUpdated.value = false; // 重置状态
+const saveProfile = async () => {
+  loading.value = true;
+  
+  // 表单验证
+  if (!profile.value.username) {
+    ElMessage.warning('用户名不能为空');
+    loading.value = false;
+    return;
   }
   
-  // 更新用户信息
-  userStore.updateUserInfo({
-    username: profile.value.name,
-    email: profile.value.email
-  });
+  if (!profile.value.phone) {
+    ElMessage.warning('手机号码不能为空');
+    loading.value = false;
+    return;
+  }
   
-  // 模拟API调用保存所有更改
-  setTimeout(() => {
-    ElMessage.success('个人信息保存成功');
-  }, 500);
-  
-  console.log('保存修改', profile.value);
+  try {
+    // 准备要更新的用户数据
+    const userData: any = {
+      username: profile.value.username,
+      phone: profile.value.phone,
+      email: profile.value.email
+    };
+    
+    // 如果密码不为空，则更新密码
+    if (profile.value.password) {
+      userData.password = profile.value.password;
+    }
+    
+    // 如果头像已更新，添加到更新数据中
+    if (avatarUpdated.value) {
+      userData.avatar = avatarUrl.value;
+    }
+
+    console.log('更新用户信息:', userData);
+
+    // 调用API更新用户信息 - 使用PUT方法和正确的路径
+    const response = await request({
+      url: '/user/users/settings',
+      method: 'put',
+      data: userData
+    });
+
+    console.log('更新用户信息响应:', response.data);
+
+    if (response.data && response.data.code === 200) {
+      // 如果头像已更新，确保store和localStorage都更新
+      if (avatarUpdated.value) {
+        // 立即更新store中的头像，确保首页立即显示新头像
+        userStore.updateAvatar(avatarUrl.value);
+        localStorage.setItem('avatar', avatarUrl.value);
+        
+        // 触发全局事件，通知其他组件更新头像
+        window.dispatchEvent(new CustomEvent('avatar-updated', { 
+          detail: { avatar: avatarUrl.value } 
+        }));
+        
+        avatarUpdated.value = false; // 重置状态
+      }
+      
+      // 更新store中的用户信息 - 实时更新到导航栏
+      userStore.updateUserInfo({
+        username: profile.value.username
+      });
+      
+      // 更新localStorage中的用户名
+      localStorage.setItem('name', profile.value.username);
+      
+      // 更新完成后不要立即离开页面，让用户看到成功消息
+      ElMessage.success({
+        message: '个人信息保存成功',
+        duration: 2000
+      });
+      
+      // 重新获取用户信息，确保显示的是最新数据
+      setTimeout(() => {
+        getUserInfo();
+        // 保存成功后退出编辑模式
+        isEditMode.value = false;
+      }, 1000);
+    } else {
+      ElMessage.error(response.data?.msg || '保存个人信息失败');
+    }
+  } catch (error) {
+    console.error('保存个人信息出错', error);
+    ElMessage.error('保存个人信息出错');
+  } finally {
+    loading.value = false;
+  }
 };
 
 const cancelEdit = () => {
@@ -176,14 +359,18 @@ const cancelEdit = () => {
     tempAvatarUrl.value = '';
   }
   
-  // 重置头像为store中的值
-  avatarUrl.value = userStore.state.avatar;
-  avatarUpdated.value = false; // 重置状态
+  // 如果头像已被临时更新但未保存，需要恢复
+  if (avatarUpdated.value) {
+    // 重置头像为store中的值
+    avatarUrl.value = userStore.state.avatar;
+    avatarUpdated.value = false; // 重置状态
+  }
   
-  // 导航回首页（确保跳转到首页而不是登录页面）
-  router.push('/home');
+  // 恢复到初始数据
+  profile.value = JSON.parse(JSON.stringify(initialProfile.value));
   
-  console.log('取消修改');
+  // 退出编辑模式
+  isEditMode.value = false;
 };
 </script>
 
@@ -195,7 +382,7 @@ const cancelEdit = () => {
 }
 
 .profile-card {
-  width: 400px;
+  width: 500px;
   border-radius: 20px;
 }
 
@@ -211,7 +398,11 @@ const cancelEdit = () => {
 }
 
 .avatar-section .el-avatar {
-  cursor: pointer; /* 添加指针样式，提示可点击 */
+  cursor: default;
+}
+
+.avatar-section .avatar-editable {
+  cursor: pointer; /* 编辑模式下添加指针样式，提示可点击 */
 }
 
 .edit-avatar {
@@ -236,10 +427,7 @@ const cancelEdit = () => {
   display: flex;
   justify-content: center;
   align-items: center;
- 
-
   margin: 0 auto;
- 
   overflow: hidden;
 }
 

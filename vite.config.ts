@@ -1,23 +1,24 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { resolve } from 'path'  // 修正导入方式
+import path from 'path'
 
-// https://vite.dev/config/
+// https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue()], 
+  base: '/',
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src')
+      '@': path.resolve(__dirname, './src')
     }
   },
-  define: {
-    // 添加process的定义，解决"Can't find variable: process"错误
-    'process': {
-      env: {
-        NODE_ENV: JSON.stringify('development')
-      },
-      // 正确模拟 process.cwd 函数，返回字符串而不是JSON字符串
-      cwd: () => '"/"'
-    }
-  }
+  server: {
+    proxy: {
+      //结合request81.ts所有请求代理到8080端口，解决了前端url直接请求后端url的跨域问题
+      '/api': {
+        target: 'http://43.138.100.3:8080',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      }
+    },
+  },
 })

@@ -295,6 +295,16 @@ import {
   Bell, User, Document, MoreFilled, Delete, Edit, ArrowDown
 } from '@element-plus/icons-vue'
 import { useFavoritesStore } from '@/store/modules/favorites'
+import { 
+  getCommunityKnowledgeList, 
+  likeCommunityKnowledge, 
+  unlikeCommunityKnowledge,
+  addComment,
+  getCommentReplies,
+  getRootComments,
+  createCommunityKnowledge,
+  updateCommunityKnowledge
+} from '@/api/community'
 
 const router = useRouter()
 
@@ -788,91 +798,101 @@ const submitPost = async () => {
 
   await postFormRef.value.validate(async (valid, fields) => {
     if (valid) {
-      // 实际应用中这里应该调用API提交数据
-      console.log('提交帖子:', postForm, '编辑ID:', currentEditPostId.value)
+      loading.value = true;
       
-      // 获取团队名称
-      let teamName = null
-      if (postForm.visibility === 'team' && postForm.teamId) {
-        const team = teamOptions.find(t => t.id === postForm.teamId)
-        teamName = team ? team.name : null
-      }
-      
-      if (currentEditPostId.value) {
-        // 更新已有帖子
-        const postIndex = myPosts.value.findIndex(p => p.id === currentEditPostId.value)
-        if (postIndex !== -1) {
-          // 更新帖子内容
-          myPosts.value[postIndex] = {
-            ...myPosts.value[postIndex],
+      try {
+        // 构建提交数据
+        const submitData = {
+          title: postForm.title,
+          content: postForm.content,
+          category: postForm.category,
+          tags: postForm.tags,
+          visibility: postForm.visibility,
+          teamId: postForm.teamId
+        };
+        
+        let success = false;
+        
+        if (currentEditPostId.value) {
+          // 更新已有帖子
+          const res = await updateCommunityKnowledge(currentEditPostId.value, submitData);
+          success = res.data && res.data.code === 200;
+        } else {
+          // 创建新帖子
+          const res = await createCommunityKnowledge(submitData);
+          success = res.data && res.data.code === 200;
+        }
+        
+        if (success) {
+          // 获取团队名称
+          let teamName = null
+          if (postForm.visibility === 'team' && postForm.teamId) {
+            const team = teamOptions.find(t => t.id === postForm.teamId)
+            teamName = team ? team.name : null
+          }
+          
+          // 添加新帖子
+          const newPost = {
+            id: Date.now(), // 使用时间戳作为临时ID
             title: postForm.title,
-            summary: postForm.content,
+            author: {
+              name: '当前用户',
+              avatar: 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'
+            },
+            createTime: new Date().toLocaleString(),
+            summary: postForm.content.substring(0, 100) + '...',
             category: postForm.category,
             tags: [...postForm.tags],
+            viewCount: 0,
+            commentCount: 0,
+            likeCount: 0,
+            collectCount: 0,
+            liked: false,
+            collected: false,
             visibility: postForm.visibility,
             teamId: postForm.teamId
           }
           
-          // 刷新列表以显示更新后的帖子
+          // 添加到我的帖子列表
+          myPosts.value.unshift(newPost)
+          
+          // 同时添加到全部帖子列表首位
+          originalPostList.value.unshift({...newPost})
+          
+          // 重置到第一页
+          resetToFirstPage()
+          
+          // 保证在关闭对话框之前已经完成数据更新
+          await nextTick()
+          
+          // 先关闭对话框
+          dialogVisible.value = false
+          
+          // 发送成功消息
+          ElMessage.success('帖子发布成功')
+          
+          // 如果当前不在"全部帖子"或"我的帖子"标签页，切换到"全部帖子"
+          if (activeTab.value !== 'all' && activeTab.value !== 'myPosts') {
+            activeTab.value = 'all'
+          }
+          
+          // 刷新列表显示新发布的帖子
           loadPosts()
           
-          ElMessage.success('帖子更新成功')
+          // 如果发布的是私密帖子或团队帖子，给用户提示
+          if (postForm.visibility === 'private') {
+            ElMessage.info('该帖子设为仅自己可见')
+          } else if (postForm.visibility === 'team') {
+            ElMessage.info(`该帖子设为仅"${teamName}"团队成员可见`)
+          }
+        } else {
+          ElMessage.error('发布失败，请重试')
         }
-      } else {
-        // 添加新帖子
-        const newPost = {
-          id: Date.now(), // 使用时间戳作为临时ID
-          title: postForm.title,
-          author: {
-            name: '当前用户',
-            avatar: 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'
-          },
-          createTime: new Date().toLocaleString(),
-          summary: postForm.content.substring(0, 100) + '...',
-          category: postForm.category,
-          tags: [...postForm.tags],
-          viewCount: 0,
-          commentCount: 0,
-          likeCount: 0,
-          collectCount: 0,
-          liked: false,
-          collected: false,
-          visibility: postForm.visibility,
-          teamId: postForm.teamId
-        }
-        
-        // 添加到我的帖子列表
-        myPosts.value.unshift(newPost)
-        
-        // 同时添加到全部帖子列表首位
-        originalPostList.value.unshift({...newPost})
-        
-        // 重置到第一页
-        resetToFirstPage()
-        
-        // 保证在关闭对话框之前已经完成数据更新
-        await nextTick()
-        
-        // 先关闭对话框
-        dialogVisible.value = false
-        
-        // 发送成功消息
-        ElMessage.success('帖子发布成功')
-        
-        // 如果当前不在"全部帖子"或"我的帖子"标签页，切换到"全部帖子"
-        if (activeTab.value !== 'all' && activeTab.value !== 'myPosts') {
-          activeTab.value = 'all'
-        }
-        
-        // 刷新列表显示新发布的帖子
-        loadPosts()
-        
-        // 如果发布的是私密帖子或团队帖子，给用户提示
-        if (postForm.visibility === 'private') {
-          ElMessage.info('该帖子设为仅自己可见')
-        } else if (postForm.visibility === 'team') {
-          ElMessage.info(`该帖子设为仅"${teamName}"团队成员可见`)
-        }
+      } catch (error) {
+        console.error('提交帖子失败:', error)
+        ElMessage.error('发布失败，请重试')
+      } finally {
+        loading.value = false
       }
     }
   })

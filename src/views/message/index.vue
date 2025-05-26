@@ -1,108 +1,220 @@
 <template>
-  <div class="message-container">
+  <div class="message-center-container">
     <div class="page-header">
-      <h2>消息推送</h2>
+      <h2>消息中心</h2>
+      <div class="header-actions">
+        <el-button 
+          type="primary" 
+          @click="markAllAsRead" 
+          :disabled="!hasUnreadMessages || isLoading"
+        >
+          全部标为已读
+        </el-button>
+      </div>
     </div>
 
-    <el-card class="main-card">
-      <template #header>
-        <div class="card-header">
-          <div class="header-title">我的消息</div>
-          <div class="header-actions">
-            <el-button size="small" type="primary" @click="markAllRead">
-              <el-icon><Check /></el-icon> 全部标为已读
-            </el-button>
-            <el-button size="small" @click="deleteAllRead">
-              <el-icon><Delete /></el-icon> 清空已读消息
-            </el-button>
-          </div>
-        </div>
-      </template>
-
+    <el-card v-loading="isLoading">
       <el-tabs v-model="activeTab">
         <el-tab-pane label="全部消息" name="all">
-          <message-list :messages="allMessages" @read="handleRead" @delete="handleDelete" />
+          <message-list 
+            :messages="displayMessages" 
+            @read="handleMarkAsRead" 
+            @delete="handleDeleteMessage"
+          />
         </el-tab-pane>
         <el-tab-pane label="未读消息" name="unread">
-          <message-list :messages="unreadMessages" @read="handleRead" @delete="handleDelete" />
+          <message-list 
+            :messages="unreadMessages" 
+            @read="handleMarkAsRead" 
+            @delete="handleDeleteMessage"
+          />
         </el-tab-pane>
-        <el-tab-pane label="系统通知" name="system">
-          <message-list :messages="systemMessages" @read="handleRead" @delete="handleDelete" />
-        </el-tab-pane>
-        <el-tab-pane label="团队消息" name="team">
-          <message-list :messages="teamMessages" @read="handleRead" @delete="handleDelete" />
+        <el-tab-pane label="已读消息" name="read">
+          <message-list 
+            :messages="readMessages" 
+            @read="handleMarkAsRead" 
+            @delete="handleDeleteMessage"
+          />
         </el-tab-pane>
       </el-tabs>
+
+      <div class="load-more" v-if="displayMessages.length > 0">
+        <el-button 
+          v-if="hasMore" 
+          type="primary" 
+          link 
+          @click="loadMoreMessages" 
+          :loading="isLoading"
+        >
+          加载更多
+        </el-button>
+        <el-empty v-else description="没有更多消息了" :image-size="60" />
+      </div>
     </el-card>
   </div>
 </template>
 
 <script lang="ts" setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Check, Delete } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import MessageList from '@/components/message/MessageList.vue'
-import messageStore from '@/store/message'
+import { getNotificationList, readNotification, deleteNotification } from '@/api/message'
 
-// 标签页
+// 消息接口定义，与数据库结构对应
+interface Message {
+  id: number;
+  receiver_id: number;
+  message_content: string;
+  message_type: number; // 1-点赞 2-评论 3-收藏
+  is_read: boolean;
+  create_time: string;
+  read_time?: string;
+  deleted?: number; // 逻辑删除标志 0-未删除 1-已删除
+}
+
+// 状态
+const messages = ref<Message[]>([])
+const isLoading = ref(false)
+const startIndex = ref(0)
+const pageSize = ref(10)
+const hasMore = ref(true)
 const activeTab = ref('all')
 
-// 根据不同类型筛选消息
-const allMessages = computed(() => {
-  return messageStore.messages.value
+// 计算属性
+const readMessages = computed(() => {
+  return messages.value.filter(msg => msg.is_read)
 })
 
 const unreadMessages = computed(() => {
-  return messageStore.messages.value.filter(msg => !msg.isRead)
+  return messages.value.filter(msg => !msg.is_read)
 })
 
-const systemMessages = computed(() => {
-  return messageStore.messages.value.filter(msg => msg.type === 'system')
+const hasUnreadMessages = computed(() => {
+  return unreadMessages.value.length > 0
 })
 
-const teamMessages = computed(() => {
-  return messageStore.messages.value.filter(msg => msg.type === 'team')
+const displayMessages = computed(() => {
+  switch (activeTab.value) {
+    case 'unread':
+      return unreadMessages.value
+    case 'read':
+      return readMessages.value
+    default:
+      return messages.value
+  }
 })
+
+// 加载消息
+const loadMessages = async (refresh = false) => {
+  if (isLoading.value) return
+
+  isLoading.value = true
+  try {
+    if (refresh) {
+      startIndex.value = 0
+      messages.value = []
+    }
+
+    const res = await getNotificationList(startIndex.value, pageSize.value)
+    if (res.data && res.data.code === 200) {
+      const newMessages = res.data.data || []
+      
+      if (refresh) {
+        messages.value = newMessages
+      } else {
+        messages.value = [...messages.value, ...newMessages]
+      }
+      
+      // 更新分页信息
+      startIndex.value += newMessages.length
+      hasMore.value = newMessages.length >= pageSize.value
+    } else {
+      ElMessage.error(res.data?.msg || '获取消息失败')
+    }
+  } catch (error) {
+    console.error('加载消息失败:', error)
+    ElMessage.error('网络错误，获取消息失败')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 加载更多消息
+const loadMoreMessages = () => {
+  loadMessages(false)
+}
 
 // 标记消息为已读
-const handleRead = (id: number) => {
-  messageStore.markAsRead(id)
-  ElMessage.success('已标记为已读')
+const handleMarkAsRead = async (id: number) => {
+  try {
+    const res = await readNotification(id)
+    if (res.data && res.data.code === 200) {
+      const messageIndex = messages.value.findIndex(msg => msg.id === id)
+      if (messageIndex !== -1) {
+        messages.value[messageIndex].is_read = true
+        messages.value[messageIndex].read_time = new Date().toISOString()
+        ElMessage.success('已标记为已读')
+      }
+    } else {
+      ElMessage.error(res.data?.msg || '操作失败')
+    }
+  } catch (error) {
+    console.error('标记已读失败:', error)
+    ElMessage.error('网络错误，操作失败')
+  }
+}
+
+// 标记所有消息为已读
+const markAllAsRead = async () => {
+  if (!hasUnreadMessages.value) return
+  
+  try {
+    ElMessageBox.confirm(
+      '确定将所有未读消息标记为已读吗？',
+      '确认操作',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    ).then(async () => {
+      const promises = unreadMessages.value.map(msg => handleMarkAsRead(msg.id))
+      await Promise.all(promises)
+      ElMessage.success('所有消息已标记为已读')
+    }).catch(() => {
+      // 用户取消操作
+    })
+  } catch (error) {
+    console.error('批量标记已读失败:', error)
+    ElMessage.error('操作失败')
+  }
 }
 
 // 删除消息
-const handleDelete = (id: number) => {
-  messageStore.deleteMessage(id)
-  ElMessage.success('消息已删除')
-}
-
-// 标记所有为已读
-const markAllRead = () => {
-  messageStore.markAllAsRead()
-  ElMessage.success('全部标记为已读')
-}
-
-// 清空已读消息
-const deleteAllRead = () => {
-  const readMessages = messageStore.messages.value.filter(msg => msg.isRead)
-  readMessages.forEach(msg => {
-    messageStore.deleteMessage(msg.id)
-  })
-  ElMessage.success('已清空已读消息')
-}
-
-// 组件挂载时，如果从通知栏点击进入，自动切换到未读消息标签
-onMounted(() => {
-  const hasUnread = messageStore.unreadCount.value > 0
-  if (hasUnread) {
-    activeTab.value = 'unread'
+const handleDeleteMessage = async (id: number) => {
+  try {
+    const res = await deleteNotification(id)
+    if (res.data && res.data.code === 200) {
+      messages.value = messages.value.filter(msg => msg.id !== id)
+      ElMessage.success('删除成功')
+    } else {
+      ElMessage.error(res.data?.msg || '删除失败')
+    }
+  } catch (error) {
+    console.error('删除消息失败:', error)
+    ElMessage.error('网络错误，删除失败')
   }
+}
+
+// 初始加载
+onMounted(() => {
+  loadMessages(true)
 })
 </script>
 
 <style scoped>
-.message-container {
-  padding: 0;
+.message-center-container {
+  padding: 20px;
 }
 
 .page-header {
@@ -114,27 +226,26 @@ onMounted(() => {
 
 .page-header h2 {
   margin: 0;
-  font-size: 22px;
-  font-weight: 500;
-}
-
-.main-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-title {
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 24px;
 }
 
 .header-actions {
   display: flex;
   gap: 10px;
 }
-</style>
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+  padding: 10px 0;
+}
+
+:deep(.el-tabs__nav) {
+  margin-bottom: 15px;
+}
+
+:deep(.el-empty) {
+  padding: 20px 0;
+}
+</style></style>
