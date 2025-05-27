@@ -29,6 +29,7 @@ const routes: Array<RouteRecordRaw> = [
   },
   {
     path: '/layout',
+    name: 'Layout',
     component: () => import('@/layout/Layout.vue'),
     redirect: '/home',
     children: [
@@ -36,7 +37,7 @@ const routes: Array<RouteRecordRaw> = [
         path: '/home',
         name: 'Home',
         component: () => import('@/views/home/index.vue'),
-        meta: { title: '首页', icon: 'House' }
+        meta: { title: '首页', icon: 'home' }
       },
       {
         path: '/profile',
@@ -85,21 +86,21 @@ const routes: Array<RouteRecordRaw> = [
       },
       {
         path: '/community',
-        name: 'CommunityService',
+        name: 'Community',
         component: () => import('@/views/community/index.vue'),
-        meta: { title: '社区服务', icon: 'ChatDotRound' }
+        meta: { title: '社区知识', icon: 'community' }
+      },
+      {
+        path: '/community/detail/:id',
+        name: 'CommunityDetail',
+        component: () => import('@/views/community/detail.vue'),
+        meta: { title: '知识详情', icon: 'document', activeMenu: '/community' }
       },
       {
         path: '/personal',
         name: 'PersonalKnowledgeBase',
         component: () => import('@/views/personal/index.vue'),
         meta: { title: '个人知识库', icon: 'Promotion' }
-      },
-      {
-        path: '/message',
-        name: 'MessageService',
-        component: () => import('@/views/message/index.vue'),
-        meta: { title: '消息推送', icon: 'Message' }
       },
     ]
   }

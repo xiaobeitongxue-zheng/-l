@@ -39,9 +39,7 @@
               <el-icon class="read-check"><CircleCheck /></el-icon>
               已读
             </span>
-            <el-button size="small" type="danger" link @click="deleteMessage(message.id)">
-              删除
-            </el-button>
+            
           </div>
         </div>
       </div>
@@ -78,10 +76,7 @@ const markAsRead = (id: number) => {
   emit('read', id)
 }
 
-// 删除消息
-const deleteMessage = (id: number) => {
-  emit('delete', id)
-}
+
 </script>
 
 <style scoped>

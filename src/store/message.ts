@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { getNotificationList, readNotification, deleteNotification } from '@/api/message'
+import { getNotificationList, readNotification } from '@/api/message'
 
 // 定义消息接口，与数据库结构对应
 export interface Message {
@@ -94,20 +94,7 @@ const markAsRead = async (id: number) => {
   }
 }
 
-// 删除消息
-const deleteMessage = async (id: number) => {
-  try {
-    const res = await deleteNotification(id)
-    if (res.data && res.data.code === 200) {
-      messages.value = messages.value.filter(msg => msg.id !== id)
-      return true
-    }
-    return false
-  } catch (error) {
-    console.error('删除消息失败:', error)
-    return false
-  }
-}
+
 
 // 标记所有为已读
 const markAllAsRead = async () => {
@@ -132,7 +119,6 @@ export default {
   isLoading,
   loadMessages,
   markAsRead,
-  deleteMessage,
   markAllAsRead,
   getMessageTypeName,
   getMessageIconType

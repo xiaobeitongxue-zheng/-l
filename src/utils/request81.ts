@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getToken, isTokenExpired } from './auth.ts';
+import { getToken, isTokenExpired } from './auth';
 import { ElMessage } from 'element-plus';
 import router from '@/router';
 
@@ -7,6 +7,9 @@ const service = axios.create({
     // baseURL: "http://43.138.100.3:8080/",
     baseURL: '/api',
     timeout: 5000,
+    headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 })
 
 // 不需要token的白名单路径

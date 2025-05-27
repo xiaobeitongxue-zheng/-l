@@ -269,11 +269,8 @@ const handleLogin = async () => {
         // 确认token已正确存储到localStorage
         console.log('登录成功，Token已设置:', localStorage.getItem('token'))
         
-        // 修改跳转方式，先确认Token存在再跳转
-        setTimeout(() => {
-          console.log('准备跳转到首页...')
-          router.push('/home')
-        }, 500)
+        // 修改跳转方式，使用location.href直接跳转，强制刷新页面
+        window.location.href = '/layout'
       } else {
         // 登录失败
         console.error('登录失败:', response.data)

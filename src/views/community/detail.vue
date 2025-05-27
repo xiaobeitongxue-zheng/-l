@@ -1,371 +1,504 @@
 <template>
-  <div class="knowledge-detail-container">
-    <div class="page-header">
-      <h2>社区知识详情</h2>
-      <el-button @click="goBack">
-        <el-icon><Back /></el-icon> 返回
+  <div class="knowledge-detail-container" v-loading="loading">
+    <div class="back-link">
+      <el-button text @click="goBack">
+        <el-icon><ArrowLeft /></el-icon> 返回列表
       </el-button>
     </div>
-
-    <el-card v-loading="loading" class="detail-card">
-      <template v-if="knowledge">
-        <div class="knowledge-header">
-          <h1 class="knowledge-title">{{ knowledge.title }}</h1>
-          <div class="knowledge-meta">
-            <span class="author">作者：{{ knowledge.author?.name || '未知' }}</span>
-            <span class="time">发布时间：{{ formatTime(knowledge.createTime) }}</span>
-            <span class="category">分类：{{ knowledge.category }}</span>
+    
+    <el-card v-if="knowledgeDetail" class="detail-card">
+      <div class="knowledge-header">
+        <h1 class="knowledge-title">{{ knowledgeDetail.title }}</h1>
+        <div class="knowledge-meta">
+          <div class="knowledge-author">
+            <el-avatar :size="32" :src="knowledgeDetail.avatar || defaultAvatar"></el-avatar>
+            <span>{{ knowledgeDetail.author }}</span>
           </div>
-          <div class="knowledge-tags">
-            <el-tag
-              v-for="tag in knowledge.tags"
-              :key="tag"
-              size="small"
-              effect="plain"
-              class="tag-item"
-            >{{ tag }}</el-tag>
-          </div>
-        </div>
-        
-        <div class="knowledge-content">
-          <div class="content-body" v-html="knowledge.content"></div>
-        </div>
-        
-        <div class="knowledge-actions">
-          <div 
-            class="action-item" 
-            :class="{ 'is-active': knowledge.liked }"
-            @click="toggleLike"
-          >
-            <span class="thumb-icon" :class="{ 'liked': knowledge.liked }">
-              <i class="thumb-up"></i>
+          <div class="knowledge-info">
+            <span class="info-item">
+              <el-icon><Calendar /></el-icon>
+              {{ formatDate(knowledgeDetail.createTime) }}
             </span>
-            <span>点赞 ({{ knowledge.likeCount || 0 }})</span>
+            <span class="info-item">
+              <el-icon><View /></el-icon>
+              {{ knowledgeDetail.viewCount || 0 }}
+            </span>
+            <span class="info-item">
+              <el-icon><ChatDotRound /></el-icon>
+              {{ knowledgeDetail.commentCount || 0 }}
+            </span>
           </div>
-          <div 
-            class="action-item" 
-            :class="{ 'is-active': knowledge.collected }"
-            @click="toggleCollect"
-          >
-            <el-icon>
-              <component :is="knowledge.collected ? 'StarFilled' : 'Star'" />
-            </el-icon>
-            <span>收藏 ({{ knowledge.collectCount || 0 }})</span>
-          </div>
-          <div class="action-item">
-            <el-icon><Share /></el-icon>
-            <span>分享</span>
+          <div class="knowledge-actions">
+            <el-button 
+              :type="knowledgeDetail.liked ? 'primary' : 'default'"
+              size="small"
+              @click="toggleLike"
+            >
+              <template #icon>
+                <el-icon><component :is="knowledgeDetail.liked ? 'StarFilled' : 'Star'" /></el-icon>
+              </template>
+              {{ knowledgeDetail.liked ? '已点赞' : '点赞' }} ({{ knowledgeDetail.likeCount || 0 }})
+            </el-button>
+            <el-button 
+              :type="knowledgeDetail.collected ? 'warning' : 'default'"
+              size="small"
+              @click="toggleCollect"
+            >
+              <template #icon>
+                <el-icon><component :is="knowledgeDetail.collected ? 'StarFilled' : 'Star'" /></el-icon>
+              </template>
+              {{ knowledgeDetail.collected ? '已收藏' : '收藏' }} ({{ knowledgeDetail.collectCount || 0 }})
+            </el-button>
           </div>
         </div>
-      </template>
+        <div class="knowledge-tags" v-if="knowledgeDetail.tags && knowledgeDetail.tags.length">
+          <el-tag 
+            v-for="tag in knowledgeDetail.tags" 
+            :key="tag" 
+            class="tag-item"
+            effect="plain"
+          >{{ tag }}</el-tag>
+        </div>
+      </div>
       
-      <el-empty v-else description="内容不存在或已被删除"></el-empty>
+      <div class="knowledge-content">
+        {{ knowledgeDetail.content }}
+      </div>
     </el-card>
-
+    
     <!-- 评论区 -->
     <el-card class="comments-card">
       <template #header>
         <div class="card-header">
-          <el-icon><ChatDotRound /></el-icon>
-          <span>评论区 ({{ totalComments }})</span>
+          <span>评论 ({{ comments.length }})</span>
         </div>
       </template>
-
-      <!-- 评论输入框 -->
+      
+      <!-- 发表评论 -->
       <div class="comment-form">
         <el-input
           v-model="commentContent"
           type="textarea"
           :rows="3"
-          placeholder="写下你的评论..."
-          :maxlength="1000"
+          placeholder="发表你的评论..."
+          maxlength="1000"
           show-word-limit
         ></el-input>
         <div class="form-actions">
-          <el-button 
-            type="primary" 
-            @click="submitComment" 
-            :loading="submittingComment"
-            :disabled="!commentContent.trim()"
-          >发表评论</el-button>
+          <el-button type="primary" @click="submitComment" :loading="submittingComment">
+            发表评论
+          </el-button>
         </div>
       </div>
-
+      
       <!-- 评论列表 -->
-      <div v-loading="loadingComments" class="comments-list">
-        <div v-if="comments.length === 0" class="empty-comments">
-          <el-empty description="暂无评论，快来发表第一条评论吧！"></el-empty>
-        </div>
-        
-        <div v-else class="comment-items">
-          <div v-for="comment in comments" :key="comment.id" class="comment-item">
-            <div class="comment-avatar">
-              <el-avatar :size="40" :src="comment.authorAvatar || ''"></el-avatar>
+      <div class="comment-list" v-if="comments.length > 0">
+        <div 
+          v-for="comment in comments" 
+          :key="comment.id" 
+          class="comment-item"
+          :class="{'reply-comment': comment.level > 1}"
+        >
+          <div class="comment-user">
+            <el-avatar :size="36" :src="comment.avatar || defaultAvatar"></el-avatar>
+          </div>
+          <div class="comment-content">
+            <div class="comment-header">
+              <span class="comment-author">{{ comment.author }}</span>
+              <span class="comment-time">{{ formatDate(comment.createTime) }}</span>
             </div>
-            <div class="comment-body">
-              <div class="comment-header">
-                <span class="comment-author">{{ comment.authorName }}</span>
-                <span class="comment-time">{{ formatTime(comment.createTime) }}</span>
+            <div class="comment-text">{{ comment.content }}</div>
+            <div class="comment-actions">
+              <span class="action-link" @click="replyToComment(comment)">回复</span>
+            </div>
+            
+            <!-- 回复输入框 -->
+            <div class="reply-form" v-if="comment.showReplyForm">
+              <el-input
+                v-model="comment.replyContent"
+                type="textarea"
+                :rows="2"
+                placeholder="回复评论..."
+                maxlength="500"
+                show-word-limit
+              ></el-input>
+              <div class="form-actions">
+                <el-button size="small" @click="cancelReply(comment)">取消</el-button>
+                <el-button 
+                  type="primary" 
+                  size="small" 
+                  @click="submitReply(comment)" 
+                  :loading="comment.submitting"
+                >回复</el-button>
               </div>
-              <div class="comment-content">{{ comment.content }}</div>
-              <div class="comment-actions">
-                <el-button type="text" size="small" @click="replyToComment(comment)">回复</el-button>
-              </div>
-              
-              <!-- 回复列表 -->
-              <div v-if="comment.replies && comment.replies.length > 0" class="replies-list">
-                <div v-for="reply in comment.replies" :key="reply.id" class="reply-item">
-                  <div class="reply-avatar">
-                    <el-avatar :size="32" :src="reply.authorAvatar || ''"></el-avatar>
-                  </div>
-                  <div class="reply-body">
-                    <div class="reply-header">
-                      <span class="reply-author">{{ reply.authorName }}</span>
-                      <span class="reply-time">{{ formatTime(reply.createTime) }}</span>
-                    </div>
-                    <div class="reply-content">
-                      <template v-if="reply.replyTo">回复 <span class="reply-to">@{{ reply.replyTo }}</span>：</template>
-                      {{ reply.content }}
-                    </div>
-                    <div class="reply-actions">
-                      <el-button type="text" size="small" @click="replyToSubComment(comment, reply)">回复</el-button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              <!-- 查看更多回复 -->
-              <div v-if="comment.hasMoreReplies" class="more-replies">
-                <el-button type="text" @click="loadMoreReplies(comment)">
-                  查看更多回复
-                </el-button>
-              </div>
-              
-              <!-- 回复输入框 -->
-              <div v-if="replyingTo && replyingTo.id === comment.id" class="reply-form">
-                <el-input
-                  v-model="replyContent"
-                  type="textarea"
-                  :rows="2"
-                  :placeholder="replyingToSub ? `回复 @${replyingToSub.authorName}` : '写下你的回复...'"
-                  :maxlength="500"
-                  show-word-limit
-                ></el-input>
-                <div class="form-actions">
-                  <el-button @click="cancelReply">取消</el-button>
-                  <el-button 
-                    type="primary" 
-                    @click="submitReply(comment)" 
-                    :loading="submittingReply"
-                    :disabled="!replyContent.trim()"
-                  >回复</el-button>
-                </div>
-              </div>
+            </div>
+            
+            <!-- 加载更多回复 -->
+            <div 
+              v-if="comment.hasMoreReplies" 
+              class="load-more-replies"
+              @click="loadMoreReplies(comment)"
+            >
+              <span>查看更多回复</span>
+              <el-icon><ArrowDown /></el-icon>
             </div>
           </div>
         </div>
-        
-        <!-- 评论分页 -->
-        <div v-if="comments.length > 0" class="comments-pagination">
-          <el-button 
-            v-if="hasMoreComments" 
-            type="primary" 
-            plain 
-            @click="loadMoreComments"
-            :loading="loadingMoreComments"
-          >加载更多评论</el-button>
-        </div>
+      </div>
+      
+      <!-- 没有评论时 -->
+      <el-empty 
+        v-else 
+        description="暂无评论，发表第一条评论吧"
+        :image-size="80"
+      ></el-empty>
+      
+      <!-- 分页 -->
+      <div class="pagination" v-if="total > pageSize">
+        <el-pagination
+          background
+          layout="prev, pager, next"
+          :total="total"
+          :page-size="pageSize"
+          :current-page="currentPage"
+          @current-change="handlePageChange"
+        />
       </div>
     </el-card>
+    
+    <!-- 收藏对话框 -->
+    <el-dialog
+      v-model="collectDialogVisible"
+      title="添加到收藏夹"
+      width="400px"
+    >
+      <div class="select-folder-list" v-loading="loadingFolders">
+        <div 
+          v-for="folder in favoritesFolders" 
+          :key="folder.id" 
+          class="select-folder-item"
+          @click="addToFolder(folder.id)"
+        >
+          <el-icon><component is="Folder" /></el-icon>
+          <span class="folder-name">{{ folder.name }}</span>
+        </div>
+        <el-empty 
+          v-if="favoritesFolders.length === 0" 
+          description="暂无收藏夹，请先创建" 
+          :image-size="50"
+        >
+          <el-button type="primary" size="small" @click="showAddFolderDialog">
+            创建收藏夹
+          </el-button>
+        </el-empty>
+      </div>
+    </el-dialog>
+    
+    <!-- 添加收藏夹对话框 -->
+    <el-dialog
+      v-model="folderDialogVisible"
+      title="添加收藏夹"
+      width="400px"
+    >
+      <el-form :model="folderForm" :rules="folderRules" ref="folderFormRef" label-width="80px">
+        <el-form-item label="名称" prop="name">
+          <el-input v-model="folderForm.name" placeholder="请输入收藏夹名称"></el-input>
+        </el-form-item>
+        <el-form-item label="描述" prop="description">
+          <el-input 
+            v-model="folderForm.description" 
+            type="textarea" 
+            :rows="3"
+            placeholder="请输入收藏夹描述"
+          ></el-input>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="folderDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitFolder" :loading="submittingFolder">
+            确定
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Back, Star, StarFilled, ChatDotRound, Share } from '@element-plus/icons-vue'
-import { useCommunityStore } from '@/store/modules/community'
-import { useFavoritesStore } from '@/store/modules/favorites'
+import type { FormInstance, FormRules } from 'element-plus'
 import { 
-  getCommunityKnowledgeDetail, 
-  getRootComments, 
-  getCommentReplies, 
+  ArrowLeft, Calendar, View, ChatDotRound, 
+  Star, StarFilled, Folder, ArrowDown
+} from '@element-plus/icons-vue'
+import { 
+  getCommunityKnowledgeDisplay,
+  likeCommunityKnowledge, 
+  unlikeCommunityKnowledge,
   addComment,
-  likeCommunityKnowledge,
-  unlikeCommunityKnowledge
+  getCommentReplies,
+  getRootComments,
+  addFavouriteFolder,
+  addFavouriteItem,
+  cancelFavourite,
+  getAllFavouriteFolders
 } from '@/api/community'
 
 const route = useRoute()
 const router = useRouter()
-const communityStore = useCommunityStore()
-const favoritesStore = useFavoritesStore()
+const knowledgeId = computed(() => Number(route.params.id))
 
-// 获取知识ID
-const knowledgeId = computed(() => Number(route.params.id) || 0)
+// 默认头像
+const defaultAvatar = 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
+
+// 加载状态
+const loading = ref(false)
+const loadingFolders = ref(false)
+const submittingComment = ref(false)
+const submittingFolder = ref(false)
 
 // 知识详情
-const knowledge = ref<any>(null)
-const loading = ref(false)
+const knowledgeDetail = ref<any>(null)
 
 // 评论相关
-const comments = ref<any[]>([])
 const commentContent = ref('')
-const replyContent = ref('')
-const loadingComments = ref(false)
-const submittingComment = ref(false)
-const submittingReply = ref(false)
-const loadingMoreComments = ref(false)
-const commentStartIndex = ref(0)
-const commentPageSize = ref(10)
-const hasMoreComments = ref(false)
-const totalComments = ref(0)
+const comments = ref<any[]>([])
+const currentPage = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
 
-// 回复状态
-const replyingTo = ref<any>(null)
-const replyingToSub = ref<any>(null)
+// 收藏相关
+const collectDialogVisible = ref(false)
+const folderDialogVisible = ref(false)
+const favoritesFolders = ref<any[]>([])
+const folderFormRef = ref<FormInstance>()
+const folderForm = reactive({
+  name: '',
+  description: ''
+})
+
+// 收藏夹表单验证规则
+const folderRules: FormRules = {
+  name: [
+    { required: true, message: '请输入收藏夹名称', trigger: 'blur' },
+    { min: 2, max: 20, message: '名称长度在2-20个字符之间', trigger: 'blur' }
+  ],
+  description: [
+    { max: 100, message: '描述不能超过100个字符', trigger: 'blur' }
+  ]
+}
+
+// 初始化
+onMounted(() => {
+  if (knowledgeId.value) {
+    loadKnowledgeDetail()
+    loadComments()
+    loadFavoritesFolders()
+  }
+})
+
+// 加载知识详情
+const loadKnowledgeDetail = async () => {
+  loading.value = true
+  try {
+    const res = await getCommunityKnowledgeDisplay(knowledgeId.value)
+    if (res && res.data) {
+      // 格式化数据
+      knowledgeDetail.value = {
+        id: res.data.id,
+        title: res.data.title || '无标题',
+        content: res.data.content || '无内容',
+        author: res.data.authorName || '匿名用户',
+        avatar: res.data.authorAvatar || defaultAvatar,
+        createTime: res.data.createTime,
+        updateTime: res.data.updateTime,
+        tags: res.data.tags ? res.data.tags.split(',') : [],
+        viewCount: res.data.viewCount || 0,
+        commentCount: res.data.commentCount || 0,
+        likeCount: res.data.likeCount || 0,
+        collectCount: res.data.collectCount || 0,
+        liked: false, // 假设默认未点赞，实际应从后端获取
+        collected: false // 假设默认未收藏，实际应从后端获取
+      }
+    }
+  } catch (error) {
+    console.error('加载知识详情失败:', error)
+    ElMessage.error('加载知识详情失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 加载评论
+const loadComments = async () => {
+  try {
+    const startIndex = (currentPage.value - 1) * pageSize.value
+    const res = await getRootComments(knowledgeId.value, startIndex, pageSize.value)
+    if (res && res.data) {
+      // 格式化评论数据
+      comments.value = res.data.map((comment: any) => {
+        return {
+          id: comment.id,
+          content: comment.content,
+          author: comment.authorName || '匿名用户',
+          avatar: comment.authorAvatar || defaultAvatar,
+          createTime: comment.createTime,
+          parentId: comment.parentId,
+          level: comment.level || 1,
+          replyCount: comment.replyCount || 0,
+          showReplyForm: false,
+          replyContent: '',
+          submitting: false,
+          hasMoreReplies: comment.replyCount > 0,
+          replies: []
+        }
+      })
+      total.value = res.data.length || 0 // 修改为使用数据长度
+    }
+  } catch (error) {
+    console.error('加载评论失败:', error)
+    ElMessage.error('加载评论失败')
+  }
+}
+
+// 加载收藏夹列表
+const loadFavoritesFolders = async () => {
+  loadingFolders.value = true
+  try {
+    const res = await getAllFavouriteFolders()
+    if (res && res.data) {
+      favoritesFolders.value = res.data.map((folder: any) => {
+        return {
+          id: folder.id,
+          name: folder.name,
+          description: folder.description,
+          itemCount: folder.itemCount || 0
+        }
+      })
+    }
+  } catch (error) {
+    console.error('加载收藏夹列表失败:', error)
+    ElMessage.error('加载收藏夹列表失败')
+  } finally {
+    loadingFolders.value = false
+  }
+}
 
 // 返回上一页
 const goBack = () => {
   router.back()
 }
 
-// 加载知识详情
-const loadKnowledgeDetail = async () => {
-  if (!knowledgeId.value) {
-    ElMessage.error('无效的知识ID')
-    return
-  }
+// 日期格式化
+const formatDate = (date: string | number | Date) => {
+  if (!date) return ''
+  const d = new Date(date)
+  return d.toLocaleString()
+}
+
+// 评论分页
+const handlePageChange = (page: number) => {
+  currentPage.value = page
+  loadComments()
+}
+
+// 点赞/取消点赞
+const toggleLike = async () => {
+  if (!knowledgeDetail.value) return
   
-  loading.value = true
   try {
-    // 使用store加载详情
-    const detail = await communityStore.fetchKnowledgeDetail(knowledgeId.value)
-    if (detail) {
-      knowledge.value = detail
+    if (knowledgeDetail.value.liked) {
+      // 取消点赞
+      await unlikeCommunityKnowledge(knowledgeDetail.value.id)
+      knowledgeDetail.value.liked = false
+      knowledgeDetail.value.likeCount = Math.max(0, knowledgeDetail.value.likeCount - 1)
+      ElMessage.success('已取消点赞')
     } else {
-      ElMessage.error('获取知识详情失败')
+      // 点赞
+      await likeCommunityKnowledge(knowledgeDetail.value.id)
+      knowledgeDetail.value.liked = true
+      knowledgeDetail.value.likeCount = knowledgeDetail.value.likeCount + 1
+      ElMessage.success('点赞成功')
     }
   } catch (error) {
-    console.error('获取社区知识详情失败:', error)
-    ElMessage.error('获取知识详情失败，请重试')
-  } finally {
-    loading.value = false
+    console.error('操作失败:', error)
+    ElMessage.error('操作失败，请重试')
   }
 }
 
-// 加载评论列表
-const loadComments = async (refresh = false) => {
-  if (!knowledgeId.value) return
+// 收藏/取消收藏
+const toggleCollect = async () => {
+  if (!knowledgeDetail.value) return
   
-  loadingComments.value = true
-  try {
-    if (refresh) {
-      commentStartIndex.value = 0
-      comments.value = []
+  if (knowledgeDetail.value.collected) {
+    // 取消收藏
+    try {
+      await cancelFavourite(knowledgeDetail.value.id)
+      knowledgeDetail.value.collected = false
+      knowledgeDetail.value.collectCount = Math.max(0, knowledgeDetail.value.collectCount - 1)
+      ElMessage.success('已取消收藏')
+    } catch (error) {
+      console.error('取消收藏失败:', error)
+      ElMessage.error('取消收藏失败，请重试')
     }
-    
-    const res = await getRootComments(knowledgeId.value, commentStartIndex.value, commentPageSize.value)
-    if (res.data && res.data.code === 200) {
-      const newComments = res.data.data.records || []
-      totalComments.value = res.data.data.total || 0
-      
-      // 处理每条评论，初始化回复列表
-      for (const comment of newComments) {
-        comment.replies = []
-        comment.hasMoreReplies = comment.replyCount > 0
-        // 如果有回复，则加载第一页回复
-        if (comment.replyCount > 0) {
-          await loadCommentReplies(comment)
+  } else {
+    // 显示收藏对话框
+    collectDialogVisible.value = true
+  }
+}
+
+// 显示添加收藏夹对话框
+const showAddFolderDialog = () => {
+  folderForm.name = ''
+  folderForm.description = ''
+  folderDialogVisible.value = true
+  collectDialogVisible.value = false
+}
+
+// 提交添加收藏夹
+const submitFolder = async () => {
+  if (!folderFormRef.value) return
+  
+  await folderFormRef.value.validate(async (valid) => {
+    if (valid) {
+      submittingFolder.value = true
+      try {
+        const res = await addFavouriteFolder({
+          name: folderForm.name,
+          description: folderForm.description
+        })
+        if (res && res.data) { // 修改条件判断
+          ElMessage.success('收藏夹创建成功')
+          folderDialogVisible.value = false
+          await loadFavoritesFolders()
+          collectDialogVisible.value = true
         }
+      } catch (error) {
+        console.error('创建收藏夹失败:', error)
+        ElMessage.error('创建收藏夹失败，请重试')
+      } finally {
+        submittingFolder.value = false
       }
-      
-      if (refresh) {
-        comments.value = newComments
-      } else {
-        comments.value = [...comments.value, ...newComments]
-      }
-      
-      // 判断是否还有更多评论
-      hasMoreComments.value = comments.value.length < totalComments.value
-      
-      // 更新下一页的起始索引
-      if (newComments.length > 0) {
-        commentStartIndex.value += newComments.length
-      }
-    } else {
-      ElMessage.error('获取评论失败')
     }
-  } catch (error) {
-    console.error('加载评论失败:', error)
-    ElMessage.error('加载评论失败，请重试')
-  } finally {
-    loadingComments.value = false
-  }
+  })
 }
 
-// 加载更多评论
-const loadMoreComments = async () => {
-  if (loadingMoreComments.value) return
-  
-  loadingMoreComments.value = true
-  try {
-    await loadComments()
-  } finally {
-    loadingMoreComments.value = false
-  }
-}
-
-// 加载评论的回复
-const loadCommentReplies = async (comment: any, refresh = false) => {
-  if (!comment) return
+// 添加到指定收藏夹
+const addToFolder = async (folderId: number) => {
+  if (!knowledgeDetail.value) return
   
   try {
-    // 如果刷新，则清空已有回复
-    if (refresh) {
-      comment.replies = []
-      comment.replyStartIndex = 0
-    }
-    
-    // 设置起始索引
-    const startIndex = comment.replyStartIndex || 0
-    const pageSize = 5 // 每次加载5条回复
-    
-    const res = await getCommentReplies(comment.id, startIndex, pageSize)
-    if (res.data && res.data.code === 200) {
-      const newReplies = res.data.data.records || []
-      
-      // 添加回复到列表
-      if (refresh) {
-        comment.replies = newReplies
-      } else {
-        comment.replies = [...comment.replies, ...newReplies]
-      }
-      
-      // 更新回复的起始索引
-      comment.replyStartIndex = (comment.replyStartIndex || 0) + newReplies.length
-      
-      // 判断是否还有更多回复
-      comment.hasMoreReplies = comment.replies.length < (comment.replyCount || 0)
-      
-      return newReplies
-    }
-    return []
+    await addFavouriteItem(knowledgeDetail.value.id, folderId)
+    knowledgeDetail.value.collected = true
+    knowledgeDetail.value.collectCount = knowledgeDetail.value.collectCount + 1
+    collectDialogVisible.value = false
+    ElMessage.success('收藏成功')
   } catch (error) {
-    console.error('加载回复失败:', error)
-    return []
-  }
-}
-
-// 加载更多回复
-const loadMoreReplies = async (comment: any) => {
-  if (!comment) return
-  
-  try {
-    await loadCommentReplies(comment)
-  } catch (error) {
-    console.error('加载更多回复失败:', error)
-    ElMessage.error('加载回复失败，请重试')
+    console.error('添加到收藏夹失败:', error)
+    ElMessage.error('添加到收藏夹失败，请重试')
   }
 }
 
@@ -376,37 +509,28 @@ const submitComment = async () => {
     return
   }
   
-  if (!knowledgeId.value) {
-    ElMessage.error('无效的知识ID')
-    return
-  }
-  
   submittingComment.value = true
   try {
-    const commentData = {
+    const res = await addComment({
       communityKnowledgeId: knowledgeId.value,
-      content: commentContent.value.trim(),
-      parentId: 0 // 顶级评论
-    }
+      content: commentContent.value,
+      parentId: 0, // 顶级评论
+      targetCommentId: 0 // 没有特定目标评论
+    })
     
-    const res = await addComment(commentData)
-    if (res.data && res.data.code === 200) {
+    if (res && res.data) { // 修改条件判断
       ElMessage.success('评论发表成功')
-      commentContent.value = '' // 清空输入框
-      
+      commentContent.value = ''
       // 刷新评论列表
-      await loadComments(true)
-      
-      // 更新知识的评论数
-      if (knowledge.value) {
-        knowledge.value.commentCount = (knowledge.value.commentCount || 0) + 1
+      loadComments()
+      // 更新评论数
+      if (knowledgeDetail.value) {
+        knowledgeDetail.value.commentCount = (knowledgeDetail.value.commentCount || 0) + 1
       }
-    } else {
-      ElMessage.error('评论发表失败')
     }
   } catch (error) {
-    console.error('提交评论失败:', error)
-    ElMessage.error('评论发表失败，请重试')
+    console.error('发表评论失败:', error)
+    ElMessage.error('发表评论失败，请重试')
   } finally {
     submittingComment.value = false
   }
@@ -414,179 +538,103 @@ const submitComment = async () => {
 
 // 回复评论
 const replyToComment = (comment: any) => {
-  replyingTo.value = comment
-  replyingToSub.value = null
-  replyContent.value = ''
-}
-
-// 回复子评论
-const replyToSubComment = (comment: any, reply: any) => {
-  replyingTo.value = comment
-  replyingToSub.value = reply
-  replyContent.value = ''
+  // 先关闭所有其他回复框
+  comments.value.forEach(c => {
+    c.showReplyForm = false
+  })
+  // 打开当前评论的回复框
+  comment.showReplyForm = true
+  comment.replyContent = ''
 }
 
 // 取消回复
-const cancelReply = () => {
-  replyingTo.value = null
-  replyingToSub.value = null
-  replyContent.value = ''
+const cancelReply = (comment: any) => {
+  comment.showReplyForm = false
+  comment.replyContent = ''
 }
 
 // 提交回复
 const submitReply = async (comment: any) => {
-  if (!replyContent.value.trim()) {
+  if (!comment.replyContent.trim()) {
     ElMessage.warning('回复内容不能为空')
     return
   }
   
-  if (!knowledgeId.value || !comment) {
-    ElMessage.error('参数错误')
-    return
-  }
-  
-  submittingReply.value = true
+  comment.submitting = true
   try {
-    const replyData = {
+    const res = await addComment({
       communityKnowledgeId: knowledgeId.value,
-      content: replyContent.value.trim(),
-      parentId: comment.id, // 父评论ID
-      targetCommentId: replyingToSub.value ? replyingToSub.value.id : null // 目标回复ID
-    }
+      content: comment.replyContent,
+      parentId: comment.id,
+      targetCommentId: comment.id
+    })
     
-    const res = await addComment(replyData)
-    if (res.data && res.data.code === 200) {
+    if (res && res.data) { // 修改条件判断
       ElMessage.success('回复发表成功')
-      replyContent.value = '' // 清空输入框
-      
-      // 取消回复状态
-      cancelReply()
-      
-      // 刷新当前评论的回复列表
-      await loadCommentReplies(comment, true)
-      
-      // 更新评论的回复数
+      comment.showReplyForm = false
+      comment.replyContent = ''
+      // 增加回复计数
       comment.replyCount = (comment.replyCount || 0) + 1
-      
-      // 更新知识的评论数
-      if (knowledge.value) {
-        knowledge.value.commentCount = (knowledge.value.commentCount || 0) + 1
+      comment.hasMoreReplies = true
+      // 更新评论数
+      if (knowledgeDetail.value) {
+        knowledgeDetail.value.commentCount = (knowledgeDetail.value.commentCount || 0) + 1
       }
-    } else {
-      ElMessage.error('回复发表失败')
+      // 可选：加载最新回复
+      loadRepliesForComment(comment)
     }
   } catch (error) {
-    console.error('提交回复失败:', error)
-    ElMessage.error('回复发表失败，请重试')
+    console.error('发表回复失败:', error)
+    ElMessage.error('发表回复失败，请重试')
   } finally {
-    submittingReply.value = false
+    comment.submitting = false
   }
 }
 
-// 点赞知识
-const toggleLike = async () => {
-  if (!knowledge.value || !knowledgeId.value) return
-  
-  try {
-    const isLiking = !knowledge.value.liked
-    
-    if (isLiking) {
-      // 点赞
-      const success = await communityStore.likeKnowledge(knowledgeId.value)
-      if (success) {
-        ElMessage.success('点赞成功')
-      } else {
-        ElMessage.error('点赞失败，请重试')
-      }
-    } else {
-      // 取消点赞
-      const success = await communityStore.unlikeKnowledge(knowledgeId.value)
-      if (success) {
-        ElMessage.success('已取消点赞')
-      } else {
-        ElMessage.error('取消点赞失败，请重试')
-      }
-    }
-  } catch (error) {
-    console.error('点赞操作失败:', error)
-    ElMessage.error('操作失败，请重试')
-  }
+// 加载更多回复
+const loadMoreReplies = (comment: any) => {
+  loadRepliesForComment(comment)
 }
 
-// 收藏知识
-const toggleCollect = async () => {
-  if (!knowledge.value || !knowledgeId.value) return
-  
+// 为指定评论加载回复
+const loadRepliesForComment = async (comment: any) => {
   try {
-    const isCollecting = !knowledge.value.collected
-    
-    // 切换收藏状态
-    knowledge.value.collected = isCollecting
-    knowledge.value.collectCount = (knowledge.value.collectCount || 0) + (isCollecting ? 1 : -1)
-    
-    if (isCollecting) {
-      // 添加到收藏
-      const favoriteItem = {
-        id: knowledge.value.id,
-        title: knowledge.value.title,
-        abstract: knowledge.value.summary || '',
-        content: knowledge.value.content || '',
-        category: knowledge.value.category || '',
-        author: knowledge.value.author?.name || '',
-        source: 'community' as const,
-        sourceUrl: `/community/detail/${knowledge.value.id}`,
-        tags: knowledge.value.tags || [],
-        favoriteTime: new Date().toLocaleString()
-      }
+    const res = await getCommentReplies(comment.id, 0, 10) // 加载前10条回复
+    if (res && res.data) {
+      // 格式化回复数据
+      const replies = res.data.map((reply: any) => {
+        return {
+          id: reply.id,
+          content: reply.content,
+          author: reply.authorName || '匿名用户',
+          avatar: reply.authorAvatar || defaultAvatar,
+          createTime: reply.createTime,
+          parentId: reply.parentId,
+          level: 2, // 回复都是二级评论
+          replyContent: '',
+          submitting: false,
+          showReplyForm: false
+        }
+      })
       
-      // 使用store添加收藏
-      favoritesStore.addFavorite(favoriteItem)
-      ElMessage.success('收藏成功')
-    } else {
-      // 从收藏中移除
-      favoritesStore.removeFavorite(knowledge.value.id, 'community')
-      ElMessage.success('已取消收藏')
+      // 更新评论的回复列表
+      comment.replies = replies
+      comment.hasMoreReplies = comment.replyCount > replies.length
     }
   } catch (error) {
-    console.error('收藏操作失败:', error)
-    ElMessage.error('操作失败，请重试')
+    console.error('加载回复失败:', error)
+    ElMessage.error('加载回复失败，请重试')
   }
 }
-
-// 格式化时间
-const formatTime = (timeString: string | undefined) => {
-  if (!timeString) return ''
-  
-  try {
-    const date = new Date(timeString)
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-  } catch (error) {
-    return timeString
-  }
-}
-
-onMounted(() => {
-  loadKnowledgeDetail()
-  loadComments(true)
-})
 </script>
 
 <style scoped>
 .knowledge-detail-container {
-  padding: 0;
+  padding: 20px;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.back-link {
   margin-bottom: 20px;
-}
-
-.page-header h2 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 500;
 }
 
 .detail-card {
@@ -594,23 +642,44 @@ onMounted(() => {
 }
 
 .knowledge-header {
-  margin-bottom: 20px;
+  margin-bottom: 30px;
 }
 
 .knowledge-title {
   font-size: 24px;
-  font-weight: 500;
-  margin-bottom: 15px;
-  line-height: 1.4;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: #303133;
 }
 
 .knowledge-meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 15px;
-  margin-bottom: 10px;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.knowledge-author {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.knowledge-info {
+  display: flex;
+  gap: 20px;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: #606266;
-  font-size: 14px;
+}
+
+.knowledge-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .knowledge-tags {
@@ -620,89 +689,24 @@ onMounted(() => {
   margin-bottom: 15px;
 }
 
-.tag-item {
-  margin-right: 5px;
-}
-
 .knowledge-content {
-  margin-bottom: 20px;
-  line-height: 1.8;
   font-size: 16px;
+  line-height: 1.8;
+  color: #303133;
+  white-space: pre-wrap;
 }
 
-.content-body {
-  min-height: 200px;
-}
-
-.knowledge-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 20px;
-  padding-top: 15px;
-  border-top: 1px solid #ebeef5;
-}
-
-.action-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
-  padding: 8px 12px;
-  border-radius: 4px;
-  transition: all 0.3s;
-}
-
-.action-item:hover {
-  background-color: #f5f7fa;
-  color: #409EFF;
-}
-
-.action-item.is-active {
-  color: #409EFF;
-}
-
-/* 点赞图标样式 */
-.thumb-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  position: relative;
-}
-
-.thumb-up {
-  display: block;
-  width: 18px;
-  height: 18px;
-  background: currentColor;
-  mask-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>');
-  -webkit-mask-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>');
-  mask-size: cover;
-  -webkit-mask-size: cover;
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  color: #909399;
-}
-
-.action-item.is-active .thumb-up,
-.thumb-icon.liked .thumb-up {
-  color: #409EFF;
-}
-
-/* 评论区样式 */
 .comments-card {
-  margin-bottom: 20px;
+  margin-bottom: 30px;
 }
 
 .card-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
+  font-size: 18px;
+  font-weight: 500;
 }
 
 .comment-form {
-  margin-bottom: 20px;
+  margin-bottom: 30px;
 }
 
 .form-actions {
@@ -711,128 +715,120 @@ onMounted(() => {
   margin-top: 10px;
 }
 
-.comments-list {
-  min-height: 100px;
-}
-
-.comment-items {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.comment-list {
+  margin-top: 20px;
 }
 
 .comment-item {
   display: flex;
-  gap: 15px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #EBEEF5;
 }
 
-.comment-avatar {
-  flex-shrink: 0;
+.comment-item:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
-.comment-body {
+.reply-comment {
+  margin-left: 40px;
+  background-color: #F9FAFC;
+  padding: 15px;
+  border-radius: 8px;
+}
+
+.comment-user {
+  margin-right: 15px;
+}
+
+.comment-content {
   flex: 1;
 }
 
 .comment-header {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
   margin-bottom: 8px;
 }
 
 .comment-author {
   font-weight: 500;
+  margin-right: 10px;
 }
 
 .comment-time {
-  color: #909399;
   font-size: 12px;
+  color: #909399;
 }
 
-.comment-content {
+.comment-text {
   margin-bottom: 10px;
   line-height: 1.6;
 }
 
 .comment-actions {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 10px;
+  gap: 15px;
 }
 
-.replies-list {
-  background-color: #f9f9f9;
-  padding: 10px;
-  border-radius: 4px;
-  margin-bottom: 10px;
-}
-
-.reply-item {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.reply-item:last-child {
-  margin-bottom: 0;
-}
-
-.reply-avatar {
-  flex-shrink: 0;
-}
-
-.reply-body {
-  flex: 1;
-}
-
-.reply-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.reply-author {
-  font-weight: 500;
-  font-size: 14px;
-}
-
-.reply-time {
-  color: #909399;
-  font-size: 12px;
-}
-
-.reply-content {
-  margin-bottom: 8px;
-  line-height: 1.5;
-  font-size: 14px;
-}
-
-.reply-to {
+.action-link {
   color: #409EFF;
-  font-weight: 500;
+  cursor: pointer;
+  font-size: 14px;
 }
 
-.reply-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.more-replies {
-  text-align: center;
-  margin-top: 10px;
-  margin-bottom: 10px;
+.action-link:hover {
+  text-decoration: underline;
 }
 
 .reply-form {
-  background-color: #f9f9f9;
+  margin-top: 15px;
+  margin-bottom: 15px;
+  background-color: #F9FAFC;
   padding: 15px;
-  border-radius: 4px;
-  margin-top: 10px;
+  border-radius: 8px;
 }
 
-.comments-pagination {
+.load-more-replies {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  color: #409EFF;
+  cursor: pointer;
+}
+
+.load-more-replies:hover {
+  text-decoration: underline;
+}
+
+.pagination {
+  margin-top: 20px;
   display: flex;
   justify-content: center;
-  margin-top: 20px;
+}
+
+.select-folder-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.select-folder-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.select-folder-item:hover {
+  background-color: #f5f7fa;
+}
+
+.folder-name {
+  margin-left: 8px;
 }
 </style> 
